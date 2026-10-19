@@ -698,7 +698,7 @@ if parsed_items and mapped_items:
     from converters.ratio_adjuster import (
         RatioModel, LaborRow, SECTION_ORDER, build_ratio_model, apply_adjustment,
     )
-    from converters import export_adjusted_excel
+    from converters import export_adjusted_excel, compute_excel_total
 
     # 모델 생성 (파일 업로드 시 1회)
     if "ratio_model" not in st.session_state or st.session_state.get("_ratio_file") != uploaded_file.name:
@@ -846,9 +846,13 @@ if parsed_items and mapped_items:
         st.dataframe(df_res, width="stretch", hide_index=True)
 
     # ── 3) 총 견적 금액 (현견적 vs 변경) ──
+    # Excel 파일에서 직접 계산 → 다운로드한 Excel의 TOTAL합계와 100% 일치
     st.subheader("총 견적 금액")
-    cur_total = model.grand_total("cur")
-    adj_total = model.grand_total("adj")
+    cur_total = compute_excel_total(output_bytes)
+    if st.session_state.get("_adj_bytes"):
+        adj_total = compute_excel_total(st.session_state._adj_bytes)
+    else:
+        adj_total = cur_total
     tc1, tc2, tc3 = st.columns(3)
     _delta = adj_total - cur_total
     tc1.markdown(

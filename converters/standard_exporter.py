@@ -1428,3 +1428,57 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def compute_excel_total(xlsx_bytes: bytes, sheet: str = "2.상세 견적") -> float:
+    """
+    생성된 표준 양식 Excel에서 'TOTAL합계'를 직접 계산한다.
+
+    Excel의 총액 구조를 그대로 재현:
+      - J2111 = 모든 상세행의 G(수량)×I(단가) 합계
+        (소계/합계/Sub합계/TOTAL/합산 행, 섹션 헤더 행 제외)
+      - J2114 = J2111 × 1.10  (5% 일반관리 + 5% 기업이윤)
+
+    UI의 '총 견적 금액'이 이 함수를 사용해야 Excel과 100% 일치한다.
+    (model.grand_total()은 별도 코드 경로로 계산해 Excel과 어긋날 수 있음)
+
+    Args:
+        xlsx_bytes: export_standard_excel() 또는 export_adjusted_excel() 결과 bytes
+        sheet: 계산할 시트명 (기본 '2.상세 견적')
+
+    Returns:
+        TOTAL합계 (원). 시트가 없으면 0.0
+    """
+    def _num(v) -> float:
+        if v is None:
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        try:
+            return float(str(v).replace(",", "").replace("원", "").strip())
+        except (ValueError, TypeError):
+            return 0.0
+
+    try:
+        wb = load_workbook(BytesIO(xlsx_bytes), data_only=False)
+    except Exception:
+        return 0.0
+    if sheet not in wb.sheetnames:
+        return 0.0
+    ws = wb[sheet]
+
+    base = 0.0
+    for r in range(1, ws.max_row + 1):
+        c = ws.cell(r, 3).value
+        cs = str(c) if c is not None else ""
+        # 소계/합계/Sub합계/TOTAL/합산 행 제외 (수식 행)
+        if any(k in cs for k in ("소계", "합계", "Sub합계", "TOTAL", "합산")):
+            continue
+        # 섹션 헤더 행 (C열 '(1) 설계' 등): G=1 플레이스홀더 → 제외
+        if cs.startswith("("):
+            continue
+        g = _num(ws.cell(r, 7).value)
+        i = _num(ws.cell(r, 9).value)
+        if g > 0 and i > 0:
+            base += g * i
+    return base * 1.10
