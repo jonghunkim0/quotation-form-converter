@@ -704,46 +704,14 @@ if parsed_items and mapped_items:
     if "ratio_model" not in st.session_state or st.session_state.get("_ratio_file") != uploaded_file.name:
         st.session_state.ratio_model = build_ratio_model(labor_data, mapped_items)
         st.session_state._ratio_file = uploaded_file.name
+        st.session_state._adj_bytes = None
+        st.session_state._adj_calculated = False
 
     model: RatioModel = st.session_state.ratio_model
     if "ratio_inputs" not in st.session_state:
         st.session_state.ratio_inputs = {}
 
     _fmt_won = lambda v: f"{v:,.0f}" if v is not None else "0"
-
-    # ── 조정견적 내보내기 (섹션 맨 위) ──
-    # 모델은 세션 상태에 유지되며, 아래 위젯에서 갱신된다. 버튼 클릭 시
-    # (새 런) 직전 런의 최종 모델 값으로 조정 탭이 생성된다.
-    # 시그니처 기반 캐싱으로 매 런마다 무거운 시트 복사를 피한다.
-    def _adj_signature(m: RatioModel) -> str:
-        parts = [
-            f"made:{m.made_pct}",
-            f"exp:{m.expense_pct}",
-        ]
-        for lr in m.labor_rows:
-            parts.append(f"{lr.section}|{lr.job}:{lr.adj_people}x{lr.adj_days}")
-        return "|".join(parts)
-
-    _sig = _adj_signature(model)
-    if st.session_state.get("_adj_sig") != _sig or st.session_state.get("_adj_bytes") is None:
-        try:
-            st.session_state._adj_bytes = export_adjusted_excel(output_bytes, model)
-            st.session_state._adj_sig = _sig
-        except Exception as _ae:
-            st.session_state._adj_bytes = None
-            st.session_state._adj_sig = None
-            st.warning(f"조정견적 생성 실패: {_ae}")
-
-    if st.session_state.get("_adj_bytes"):
-        _adj_name = Path(uploaded_file.name).stem
-        st.download_button(
-            label="📤 조정견적 내보내기",
-            data=st.session_state._adj_bytes,
-            file_name=f"조정견적_{_adj_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-            use_container_width=True,
-        )
 
     # ── 1) 상단 요약: 가공품/경비 비율(%) 입력 ──
     st.subheader("재료비·경비 조정 (변경 비율)")
@@ -830,9 +798,19 @@ if parsed_items and mapped_items:
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
-        # 입력 적용 + 결과 계산
+    # ── 견적조정 산출 버튼 ──
+    if st.button("📐 견적조정 산출", type="primary", use_container_width=True):
         apply_adjustment(model, st.session_state.ratio_inputs)
+        try:
+            st.session_state._adj_bytes = export_adjusted_excel(output_bytes, model)
+            st.session_state._adj_calculated = True
+        except Exception as _ae:
+            st.session_state._adj_bytes = None
+            st.session_state._adj_calculated = False
+            st.warning(f"조정견적 생성 실패: {_ae}")
 
+    # ── 산출 결과 (버튼 클릭 후) ──
+    if st.session_state.get("_adj_calculated") and st.session_state.get("_adj_bytes"):
         # 변경 결과 요약
         res_rows = []
         for sec in SECTION_ORDER:
@@ -845,31 +823,40 @@ if parsed_items and mapped_items:
         df_res = pd.DataFrame(res_rows, columns=["구분", "현견적(원)", "변경(원)", "증감(원)"])
         st.dataframe(df_res, width="stretch", hide_index=True)
 
-    # ── 3) 총 견적 금액 (현견적 vs 변경) ──
-    # Excel 파일에서 직접 계산 → 다운로드한 Excel의 TOTAL합계와 100% 일치
-    st.subheader("총 견적 금액")
-    cur_total = compute_excel_total(output_bytes)
-    if st.session_state.get("_adj_bytes"):
+        # 총 견적 금액 (Excel 파일에서 직접 계산 → TOTAL합계와 100% 일치)
+        st.subheader("총 견적 금액")
+        cur_total = compute_excel_total(output_bytes)
         adj_total = compute_excel_total(st.session_state._adj_bytes)
+        tc1, tc2, tc3 = st.columns(3)
+        _delta = adj_total - cur_total
+        tc1.markdown(
+            f"<div style='font-size:0.8rem;color:#888;'>현견적 총액</div>"
+            f"<div style='font-size:1.05rem;font-weight:600;'>{cur_total:,.0f}원</div>",
+            unsafe_allow_html=True,
+        )
+        tc2.markdown(
+            f"<div style='font-size:0.8rem;color:#888;'>변경 후 총액</div>"
+            f"<div style='font-size:1.05rem;font-weight:600;'>{adj_total:,.0f}원</div>",
+            unsafe_allow_html=True,
+        )
+        tc3.markdown(
+            f"<div style='font-size:0.8rem;color:#888;'>증감</div>"
+            f"<div style='font-size:1.05rem;font-weight:600;color:{'#c0392b' if _delta > 0 else '#27ae60'};'>{_delta:+,.0f}원</div>",
+            unsafe_allow_html=True,
+        )
+
+        # 다운로드 버튼
+        _adj_name = Path(uploaded_file.name).stem
+        st.download_button(
+            label="📤 조정견적 내보내기",
+            data=st.session_state._adj_bytes,
+            file_name=f"조정견적_{_adj_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
     else:
-        adj_total = cur_total
-    tc1, tc2, tc3 = st.columns(3)
-    _delta = adj_total - cur_total
-    tc1.markdown(
-        f"<div style='font-size:0.8rem;color:#888;'>현견적 총액</div>"
-        f"<div style='font-size:1.05rem;font-weight:600;'>{cur_total:,.0f}원</div>",
-        unsafe_allow_html=True,
-    )
-    tc2.markdown(
-        f"<div style='font-size:0.8rem;color:#888;'>변경 후 총액</div>"
-        f"<div style='font-size:1.05rem;font-weight:600;'>{adj_total:,.0f}원</div>",
-        unsafe_allow_html=True,
-    )
-    tc3.markdown(
-        f"<div style='font-size:0.8rem;color:#888;'>증감</div>"
-        f"<div style='font-size:1.05rem;font-weight:600;color:{'#c0392b' if _delta > 0 else '#27ae60'};'>{_delta:+,.0f}원</div>",
-        unsafe_allow_html=True,
-    )
+        st.info("📐 '견적조정 산출' 버튼을 클릭하면 조정 결과가 계산됩니다.")
 
     # ─── 5. 분석 결과 내보내기 (원가분석툴과 동일 문서) ──────────
     st.header("5️⃣ 분석 결과 내보내기")

@@ -1404,6 +1404,18 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
         if cs.startswith("("):
             continue
 
+        # D열 라벨 (Engineering 등 특정 행 식별용)
+        d_val = new.cell(r, 4).value
+        d_str = str(d_val).strip() if d_val is not None else ""
+
+        # 0) Engineering (PRI Engineering Fee): 자체 섹션 비율로 MD(G열) 스케일
+        if d_str == "Engineering":
+            ratio = _labor_ratio.get("(0) PRI Engineering", 1.0)
+            if ratio != 1.0:
+                g = new.cell(r, 7).value
+                if isinstance(g, (int, float)):
+                    new.cell(r, 7).value = g * ratio
+            continue
         # 1) 재료비·가공품: 단가(I열) 스케일 (구매품은 변경 불가)
         if cur_dangayuh == "가공품" and cur_gubun in ("기구부", "전장/제어"):
             ratio = _made_ratio("기구부") if cur_gubun == "기구부" else _tz_ratio

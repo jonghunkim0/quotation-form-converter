@@ -43,7 +43,7 @@ _LABOR_SECTION_MAP: Dict[str, Tuple[str, str]] = {
     "인건비-특수제어":        ("(5) 특수제어", "제어엔지니어"),
 }
 
-SECTION_ORDER = ["(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응", "(5) 특수제어"]
+SECTION_ORDER = ["(0) PRI Engineering", "(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응", "(5) 특수제어"]
 
 
 @dataclass
@@ -183,6 +183,22 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
             cur_people=people, cur_days=days,
             adj_people=people, adj_days=days,  # 변경은 현견적과 동일하게 시작
         ))
+
+    # ── Engineering (PRI Engineering Fee) — 단가 600,000원 고정 ──
+    total_labor_md = sum(info.get("md", 0) or 0 for info in (labor_data or {}).values())
+    if total_labor_md > 0:
+        if total_labor_md < 21:
+            eng_md = int(round(total_labor_md / 7.0)) * 7
+        else:
+            eng_md = int(round(total_labor_md / 30.0)) * 30
+    else:
+        eng_md = 0
+    eng_people, eng_days = _decompose_md(eng_md, "")
+    model.labor_rows.insert(0, LaborRow(
+        section="(0) PRI Engineering", job="PRI Engineering", rate=600000,
+        cur_people=eng_people, cur_days=eng_days,
+        adj_people=eng_people, adj_days=eng_days,
+    ))
 
     # ── 재료비 (mapped_items의 _분류별 금액 합산) ──
     made = {"기구부": 0.0, "전장부": 0.0, "제어부": 0.0}
