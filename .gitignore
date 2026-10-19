@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Streamlit / 실행 산출물
+server.log
+data/output/
+data/_debug_export.json
+data/*.xml
+data/test_*.xlsx
+data/custom_template.xlsx
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
