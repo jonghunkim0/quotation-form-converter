@@ -199,7 +199,10 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
         if it.get("_합산"):
             continue
         sec = it.get("_분류", "")
-        amt = _parse_amount(it.get("금액"))
+        # Excel과 동일하게 수량 × 단가로 계산 (금액 필드와 다를 수 있음)
+        qty = _parse_amount(it.get("수량"))
+        price = _parse_amount(it.get("단가"))
+        amt = qty * price
         if sec in _FAMILY:
             kind, fam = _FAMILY[sec]
             (made if kind == "made" else buy)[fam] += amt
