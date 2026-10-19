@@ -112,12 +112,15 @@ class RatioModel:
         return self.expense * self.expense_pct / 100.0
 
     def grand_total(self, side: str = "cur") -> float:
+        """총 견적 = (재료비 + 인건비 + 경비) × 1.10 (일반관리 5% + 기업이윤 5%)"""
         if side == "cur":
-            return (self.mat_total("made") + self.mat_total("buy")
-                    + self.labor_total("cur") + self.expense + self.overhead)
-        return (sum(self.made_adj(f) for f in self.mat_made)
-                + self.mat_total("buy")
-                + self.labor_total("adj") + self.expense_adj() + self.overhead)
+            base = (self.mat_total("made") + self.mat_total("buy")
+                    + self.labor_total("cur") + self.expense)
+        else:
+            base = (sum(self.made_adj(f) for f in self.mat_made)
+                    + self.mat_total("buy")
+                    + self.labor_total("adj") + self.expense_adj())
+        return base * 1.10
 
 
 def _parse_amount(val) -> float:
@@ -192,6 +195,9 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
     }
     expense = 0.0
     for it in (mapped_items or []):
+        # Unit(합산) 행은 하위 세부항목의 합계이므로 스킵 (이중계산 방지)
+        if it.get("_합산"):
+            continue
         sec = it.get("_분류", "")
         amt = _parse_amount(it.get("금액"))
         if sec in _FAMILY:
