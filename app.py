@@ -828,6 +828,22 @@ if parsed_items and mapped_items:
     if st.session_state.get("_adj_calculated") and st.session_state.get("_adj_bytes"):
         # 변경 결과 요약
         res_rows = []
+        # 재료비 (가공품)
+        for fam in ("기구부", "전장부", "제어부"):
+            cur = model.mat_made.get(fam, 0.0)
+            adj = model.made_adj(fam)
+            if cur or adj:
+                res_rows.append((f"가공품 · {fam}", cur, adj, adj - cur))
+        # 재료비 (구매품)
+        for fam in ("기구부", "전장부", "제어부"):
+            cur = model.mat_buy.get(fam, 0.0)
+            if cur:
+                res_rows.append((f"구매품 · {fam}", cur, cur, 0))
+        # 경비
+        if model.expense:
+            exp_adj = model.expense_adj()
+            res_rows.append(("경비", model.expense, exp_adj, exp_adj - model.expense))
+        # 인건비
         for sec in SECTION_ORDER:
             cur = model.section_sum(sec, "cur")
             adj = model.section_sum(sec, "adj")
