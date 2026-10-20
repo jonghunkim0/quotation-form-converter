@@ -723,7 +723,9 @@ if parsed_items and mapped_items:
         st.session_state._adj_bytes = None
         st.session_state._adj_calculated = False
         # number_input 위젯 키(ratio_*)도 삭제 → 이전 조정값이 위젯에 유지되는 것 방지
-        for _k in [k for k in st.session_state.keys() if k.startswith("ratio_")]:
+        # (ratio_model/ratio_inputs는 제외 — 방금 초기화한 값)
+        for _k in [k for k in st.session_state.keys()
+                   if k.startswith("ratio_") and k not in ("ratio_model", "ratio_inputs")]:
             del st.session_state[_k]
 
     model: RatioModel = st.session_state.ratio_model
