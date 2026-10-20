@@ -587,15 +587,15 @@ cd C:\\AI_Agent\\quotation-form-converter
         }
 
     if parsed_items:
-        st.subheader("파싱 결과 (원본)")
-        raw_rows = []
-        for item in parsed_items:
-            row = item["raw_data"].copy()
-            row["_시트/페이지"] = item.get("sheet_name") or f"p.{item.get('page', '?')}"
-            raw_rows.append(row)
-        df_raw = pd.DataFrame(raw_rows)
-        st.dataframe(_df_for_display(df_raw), width="stretch")
-        st.caption(f"총 {len(parsed_items)}개 항목 추출")
+        with st.expander(f"🔍 파싱 결과 (원본) 보기 — {len(parsed_items)}개 항목", expanded=False):
+            raw_rows = []
+            for item in parsed_items:
+                row = item["raw_data"].copy()
+                row["_시트/페이지"] = item.get("sheet_name") or f"p.{item.get('page', '?')}"
+                raw_rows.append(row)
+            df_raw = pd.DataFrame(raw_rows)
+            st.dataframe(_df_for_display(df_raw), width="stretch")
+            st.caption(f"총 {len(parsed_items)}개 항목 추출")
 
 # ─── 메인: 변환 결과 ───────────────────────────────────────────
 st.header("2️⃣ 표준 양식으로 변환")
@@ -609,40 +609,39 @@ if parsed_items and mapped_items:
     col3.metric("통화", auto_info.get("통화", "-"))
     col4.metric("특기사항", auto_info.get("특기사항", "-"))
 
-    # ─── 매핑 결과 표시 ─────────────────────────────────────────
-    st.subheader("매핑 결과")
-    
-    # 표시용 DataFrame (내부 필드 제외)
-    display_cols = list(STANDARD_COLUMNS)
-    if show_original:
-        display_cols.append("_원본명")
-    display_cols.append("_신뢰도")
-    
-    df_mapped = pd.DataFrame(mapped_items)[display_cols]
-    df_mapped.columns = [
-        "원본 컬럼명" if c == "_원본명" else 
-        "신뢰도" if c == "_신뢰도" else c 
-        for c in display_cols
-    ]
-    
-    st.dataframe(_df_for_display(df_mapped), width="stretch")
+    # ─── 매핑 결과 표시 (접힘) ─────────────────────────────────
+    with st.expander(f"🔗 매핑 결과 보기 — {len(mapped_items)}개 항목", expanded=False):
+        # 표시용 DataFrame (내부 필드 제외)
+        display_cols = list(STANDARD_COLUMNS)
+        if show_original:
+            display_cols.append("_원본명")
+        display_cols.append("_신뢰도")
 
-    # 신뢰도 80% 미만 항목 강조
-    low_confidence = [
-        item for item in mapped_items 
-        if item.get("_신뢰도", 1.0) < CONFIDENCE_THRESHOLD
-    ]
-    if low_confidence:
-        st.warning(
-            f"⚠️ 신뢰도 80% 미만 항목 {len(low_confidence)}개 - 사용자 확인 필요"
-        )
-        df_low = pd.DataFrame(low_confidence)[display_cols]
-        df_low.columns = [
+        df_mapped = pd.DataFrame(mapped_items)[display_cols]
+        df_mapped.columns = [
             "원본 컬럼명" if c == "_원본명" else 
             "신뢰도" if c == "_신뢰도" else c 
             for c in display_cols
         ]
-        st.dataframe(_df_for_display(df_low), width="stretch")
+
+        st.dataframe(_df_for_display(df_mapped), width="stretch")
+
+        # 신뢰도 80% 미만 항목 강조
+        low_confidence = [
+            item for item in mapped_items 
+            if item.get("_신뢰도", 1.0) < CONFIDENCE_THRESHOLD
+        ]
+        if low_confidence:
+            st.warning(
+                f"⚠️ 신뢰도 80% 미만 항목 {len(low_confidence)}개 - 사용자 확인 필요"
+            )
+            df_low = pd.DataFrame(low_confidence)[display_cols]
+            df_low.columns = [
+                "원본 컬럼명" if c == "_원본명" else 
+                "신뢰도" if c == "_신뢰도" else c 
+                for c in display_cols
+            ]
+            st.dataframe(_df_for_display(df_low), width="stretch")
 
     # 검증 결과 요약
     st.subheader("검증 요약")
