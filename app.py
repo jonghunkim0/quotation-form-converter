@@ -715,12 +715,16 @@ if parsed_items and mapped_items:
     )
     from converters import export_adjusted_excel, compute_excel_total
 
-    # 모델 생성 (파일 업로드 시 1회)
+    # 모델 생성 (파일 업로드 시 1회) — 새 파일이면 이전 조정 입력/결과도 리셋
     if "ratio_model" not in st.session_state or st.session_state.get("_ratio_file") != uploaded_file.name:
         st.session_state.ratio_model = build_ratio_model(labor_data, mapped_items)
         st.session_state._ratio_file = uploaded_file.name
+        st.session_state.ratio_inputs = {}
         st.session_state._adj_bytes = None
         st.session_state._adj_calculated = False
+        # number_input 위젯 키(ratio_*)도 삭제 → 이전 조정값이 위젯에 유지되는 것 방지
+        for _k in [k for k in st.session_state.keys() if k.startswith("ratio_")]:
+            del st.session_state[_k]
 
     model: RatioModel = st.session_state.ratio_model
     if "ratio_inputs" not in st.session_state:
@@ -784,6 +788,15 @@ if parsed_items and mapped_items:
     if not model.labor_rows:
         st.info("인건비 항목이 없습니다.")
     else:
+        # 헤더 행 (재료비·경비 조정과 동일 양식)
+        _lh = st.columns([3, 1, 1, 1, 1, 1])
+        _cell(_lh[0], "구분", "#888")
+        _cell(_lh[1], "현견적(원)", "#888")
+        _cell(_lh[2], "인원수", "#888")
+        _cell(_lh[3], "대응일수", "#888")
+        _cell(_lh[4], "변경(원)", "#888")
+        _cell(_lh[5], "증감(원)", "#888")
+
         for sec in SECTION_ORDER:
             sec_rows = [r for r in model.labor_rows if r.section == sec]
             if not sec_rows:
@@ -792,24 +805,26 @@ if parsed_items and mapped_items:
             for r in sec_rows:
                 key_p = f"{r.section}|{r.job}|people"
                 key_d = f"{r.section}|{r.job}|days"
-                ic1, ic2, ic3, ic4 = st.columns([3, 1, 1, 2])
+                ic1, ic2, ic3, ic4, ic5, ic6 = st.columns([3, 1, 1, 1, 1, 1])
                 _cell(ic1, f"{r.job} "
                     f"<span style='color:#888;font-size:0.75rem;'>단가 {_fmt_won(r.rate)} · "
-                    f"현 MD {r.cur_md:,.0f} · 현 금액 {_fmt_won(r.cur_amount)}원</span>")
-                new_p = ic2.number_input(
+                    f"현 MD {r.cur_md:,.0f}</span>")
+                _cell(ic2, _fmt_won(r.cur_amount))
+                new_p = ic3.number_input(
                     "대응인원수", min_value=0.0, step=1.0,
                     value=float(st.session_state.ratio_inputs.get(key_p, r.adj_people) or 0),
                     key=f"ratio_{key_p}", label_visibility="collapsed",
                 )
-                new_d = ic3.number_input(
+                new_d = ic4.number_input(
                     "대응기간(일)", min_value=0.0, step=1.0,
                     value=float(st.session_state.ratio_inputs.get(key_d, r.adj_days) or 0),
                     key=f"ratio_{key_d}", label_visibility="collapsed",
                 )
                 adj_md = new_p * new_d
                 adj_amt = adj_md * r.rate
-                _cell(ic4, f"→ MD {adj_md:,.0f} · "
-                    f"{adj_amt:,.0f}원 ({adj_amt - r.cur_amount:+,.0f})", "#0066cc")
+                _cell(ic5, f"{adj_amt:,.0f}", "#0066cc")
+                _cell(ic6, f"{adj_amt - r.cur_amount:+,.0f}",
+                      "#c0392b" if adj_amt - r.cur_amount > 0 else "#27ae60")
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
