@@ -730,10 +730,12 @@ if parsed_items and mapped_items:
 
     # ── 1) 상단 요약: 가공품/경비 비율(%) 입력 ──
     st.subheader("재료비·경비 조정 (변경 비율)")
-    _fam_cols = st.columns([2, 1, 1])
+    _fam_cols = st.columns([2, 1, 1, 1, 1])
     _cell(_fam_cols[0], "구분", "#888")
     _cell(_fam_cols[1], "현견적(원)", "#888")
     _cell(_fam_cols[2], "변경 비율(%)", "#b8860b")
+    _cell(_fam_cols[3], "변경(원)", "#888")
+    _cell(_fam_cols[4], "증감(원)", "#888")
 
     for fam in ("기구부", "전장부", "제어부"):
         cur = model.mat_made.get(fam, 0.0)
@@ -747,6 +749,9 @@ if parsed_items and mapped_items:
         )
         st.session_state.ratio_inputs[key] = new_pct
         model.made_pct[fam] = new_pct
+        adj = model.made_adj(fam)
+        _cell(_fam_cols[3], _fmt_won(adj))
+        _cell(_fam_cols[4], f"{adj - cur:+,.0f}", "#c0392b" if adj - cur > 0 else "#27ae60")
 
     # 구매품 (개별 변경 불가 — 표시만)
     for fam in ("기구부", "전장부", "제어부"):
@@ -756,6 +761,8 @@ if parsed_items and mapped_items:
         _cell(_fam_cols[0], f"2. 구매품 · {fam}")
         _cell(_fam_cols[1], _fmt_won(cur))
         _cell(_fam_cols[2], "개별 변경 불가", "#888")
+        _cell(_fam_cols[3], _fmt_won(cur))
+        _cell(_fam_cols[4], "0")
 
     # 경비 (비율 입력)
     _cell(_fam_cols[0], "4. 경비")
@@ -767,6 +774,10 @@ if parsed_items and mapped_items:
     )
     st.session_state.ratio_inputs["expense|pct"] = exp_pct
     model.expense_pct = exp_pct
+    exp_adj = model.expense_adj()
+    _cell(_fam_cols[3], _fmt_won(exp_adj))
+    _cell(_fam_cols[4], f"{exp_adj - model.expense:+,.0f}",
+          "#c0392b" if exp_adj - model.expense > 0 else "#27ae60")
 
     # ── 2) 인건비 조정: 대응인원수/대응기간 입력 ──
     st.subheader("인건비 조정 (대응인원수 · 대응기간)")
@@ -781,7 +792,7 @@ if parsed_items and mapped_items:
             for r in sec_rows:
                 key_p = f"{r.section}|{r.job}|people"
                 key_d = f"{r.section}|{r.job}|days"
-                ic1, ic2, ic3 = st.columns([3, 1, 1])
+                ic1, ic2, ic3, ic4 = st.columns([3, 1, 1, 2])
                 _cell(ic1, f"{r.job} "
                     f"<span style='color:#888;font-size:0.75rem;'>단가 {_fmt_won(r.rate)} · "
                     f"현 MD {r.cur_md:,.0f} · 현 금액 {_fmt_won(r.cur_amount)}원</span>")
@@ -795,6 +806,10 @@ if parsed_items and mapped_items:
                     value=float(st.session_state.ratio_inputs.get(key_d, r.adj_days) or 0),
                     key=f"ratio_{key_d}", label_visibility="collapsed",
                 )
+                adj_md = new_p * new_d
+                adj_amt = adj_md * r.rate
+                _cell(ic4, f"→ MD {adj_md:,.0f} · "
+                    f"{adj_amt:,.0f}원 ({adj_amt - r.cur_amount:+,.0f})", "#0066cc")
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
