@@ -301,12 +301,36 @@ APP_UPDATED = "2026. 10. 19."
 st.markdown(
     f'<div style="display:flex;align-items:baseline;gap:10px;">'
     f'<h1 style="margin:0;">📋 견적 표준 양식 변환기</h1>'
-    f'<span style="font-size:0.85rem;color:#888;">'
+    f'<span style="font-size:0.75rem;color:#888;">'
     f'ver {APP_VERSION} · 업데이트 {APP_UPDATED}</span>'
     f'</div>',
     unsafe_allow_html=True,
 )
 st.caption("업체별 견적서(PDF/Excel)를 표준 양식 Excel로 변환합니다.")
+
+# ─── 전역 컴팩트 스타일 (글씨/줄간격 ~30% 축소) ────────────────
+st.markdown(
+    """
+    <style>
+    /* 기준 글씨 크기 축소 (rem 단위 전체가 이 값에 비례) */
+    html { font-size: 13px !important; }
+    /* 본문/캡션 줄간격 축소 */
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stCaptionContainer"] { line-height: 1.4 !important; }
+    /* 제목 간격 축소 */
+    div[data-testid="stHeader"] { margin-top: 0.4rem !important; margin-bottom: 0.2rem !important; }
+    div[data-testid="stSubheader"] { margin-top: 0.3rem !important; margin-bottom: 0.15rem !important; }
+    /* markdown 컨테이너 기본 하단 여백 축소 */
+    div[data-testid="stMarkdownContainer"] { margin-bottom: 0.3rem !important; }
+    /* dataframe 글씨/여백 축소 */
+    div[data-testid="stDataFrame"] { font-size: 0.78rem !important; }
+    div[data-testid="stDataFrame"] .stDataFrameResizable { font-size: 0.78rem !important; }
+    /* 버튼 패딩 축소 */
+    div[data-testid="stButton"] button { padding: 0.35rem 0.8rem !important; font-size: 0.85rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ─── 사이드바: 설정 ────────────────────────────────────────────
 st.sidebar.header("⚙️ 설정")
@@ -677,7 +701,7 @@ if parsed_items and mapped_items:
     # UI: 모든 셀을 동일한 고정 높이로 맞춰 좌우 행을 정렬.
     # st.columns는 컬럼별 독립 흐름이라 number_input(높음)과 텍스트(낮음)의
     # 높이 차이가 누적되어 행이 어긋난다 → 모든 셀을 _ROW_H 높이 flex 박스로 통일.
-    _ROW_H = 38
+    _ROW_H = 26
     st.markdown(
         f"""
         <style>
@@ -686,9 +710,9 @@ if parsed_items and mapped_items:
             margin: 0 !important;
         }}
         div[data-testid="stNumberInput"] input {{
-            height: 28px !important;
-            padding: 2px 8px !important;
-            font-size: 0.85rem !important;
+            height: 20px !important;
+            padding: 1px 6px !important;
+            font-size: 0.75rem !important;
         }}
         /* markdown 셀 컨테이너의 기본 margin-bottom(-16px)을 0으로 리셋.
            이 음수 마진이 number_input(38px)과 텍스트 셀(22px)의 높이 차이를
@@ -705,7 +729,7 @@ if parsed_items and mapped_items:
         """고정 높이(_ROW_H) flex 박스로 셀 렌더 → 컬럼 간 행 정렬."""
         col.markdown(
             f"<div class='adj-cell' style='height:{_ROW_H}px;display:flex;"
-            f"align-items:center;font-size:0.85rem;color:{color};'>{html}</div>",
+            f"align-items:center;font-size:0.75rem;color:{color};'>{html}</div>",
             unsafe_allow_html=True,
         )
 
@@ -808,7 +832,7 @@ if parsed_items and mapped_items:
                 key_d = f"{r.section}|{r.job}|days"
                 ic1, ic2, ic3, ic4, ic5, ic6 = st.columns([3, 1, 1, 1, 1, 1])
                 _cell(ic1, f"{r.job} "
-                    f"<span style='color:#888;font-size:0.75rem;'>단가 {_fmt_won(r.rate)} · "
+                    f"<span style='color:#888;font-size:0.68rem;'>단가 {_fmt_won(r.rate)} · "
                     f"현 MD {r.cur_md:,.0f}</span>")
                 _cell(ic2, _fmt_won(r.cur_amount))
                 new_p = ic3.number_input(
@@ -878,18 +902,18 @@ if parsed_items and mapped_items:
         tc1, tc2, tc3 = st.columns(3)
         _delta = adj_total - cur_total
         tc1.markdown(
-            f"<div style='font-size:0.8rem;color:#888;'>현견적 총액</div>"
-            f"<div style='font-size:1.05rem;font-weight:600;'>{cur_total:,.0f}원</div>",
+            f"<div style='font-size:0.7rem;color:#888;'>현견적 총액</div>"
+            f"<div style='font-size:0.9rem;font-weight:600;'>{cur_total:,.0f}원</div>",
             unsafe_allow_html=True,
         )
         tc2.markdown(
-            f"<div style='font-size:0.8rem;color:#888;'>변경 후 총액</div>"
-            f"<div style='font-size:1.05rem;font-weight:600;'>{adj_total:,.0f}원</div>",
+            f"<div style='font-size:0.7rem;color:#888;'>변경 후 총액</div>"
+            f"<div style='font-size:0.9rem;font-weight:600;'>{adj_total:,.0f}원</div>",
             unsafe_allow_html=True,
         )
         tc3.markdown(
-            f"<div style='font-size:0.8rem;color:#888;'>증감</div>"
-            f"<div style='font-size:1.05rem;font-weight:600;color:{'#c0392b' if _delta > 0 else '#27ae60'};'>{_delta:+,.0f}원</div>",
+            f"<div style='font-size:0.7rem;color:#888;'>증감</div>"
+            f"<div style='font-size:0.9rem;font-weight:600;color:{'#c0392b' if _delta > 0 else '#27ae60'};'>{_delta:+,.0f}원</div>",
             unsafe_allow_html=True,
         )
 
