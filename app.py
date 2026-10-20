@@ -855,9 +855,10 @@ if parsed_items and mapped_items:
         st.dataframe(df_res, width="stretch", hide_index=True)
 
         # 총 견적 금액 (Excel 파일에서 직접 계산 → TOTAL합계와 100% 일치)
+        # 조정 견적은 '3.조정 견적' 시트에 있으므로 해당 시트를 읽어야 함
         st.subheader("총 견적 금액")
         cur_total = compute_excel_total(output_bytes)
-        adj_total = compute_excel_total(st.session_state._adj_bytes)
+        adj_total = compute_excel_total(st.session_state._adj_bytes, sheet="3.조정 견적")
         tc1, tc2, tc3 = st.columns(3)
         _delta = adj_total - cur_total
         tc1.markdown(
