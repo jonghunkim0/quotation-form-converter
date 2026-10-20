@@ -415,6 +415,7 @@ parsed_items = None  # 파싱된 항목 목록
 mapped_items = None  # 매핑된 항목
 output_bytes = None  # 생성된 Excel bytes
 auto_info = {}  # 자동 추출 정보
+labor_data = None   # 인건비 데이터 (analyzer)
 
 # ── 원가분석툴(analyzer) 파이프라인 ──
 analyzer_qf = None       # QuotationFile (analyzer 파싱 결과)
@@ -423,69 +424,76 @@ analyzer_issues = []      # ValidationIssue 목록
 
 if uploaded_file is not None:
     st.success(f"업로드됨: `{uploaded_file.name}`")
-    
-    # 진행 상황 표시 (가로 막대)
-    progress = st.progress(0, text="시작...")
-    
-    try:
-        # Step 1: 파싱
-        progress.progress(10, text="📄 파싱 중...")
-        if uploaded_file.name.lower().endswith(".pdf"):
-            parsed_items = parse_pdf(uploaded_file)
-        else:
-            parsed_items = parse_excel(uploaded_file)
-        
-        # Step 2: 매핑
-        progress.progress(30, text="🔗 매핑 중...")
-        rules = {}
-        if RULES_FILE.exists():
-            rules = json.loads(RULES_FILE.read_text(encoding="utf-8"))
-        mapper = RuleMapper(rules)
-        mapped_items = mapper.map_items(parsed_items)
-        
-        # Step 3: 원가분석툴(analyzer) 파이프라인 (분류 결과 확보)
-        progress.progress(50, text="🔍 원가분석 중...")
+
+    # ── 파이프라인 캐시: 파일/옵션 변경 시에만 재실행 (조정 입력 시 재실행 방지) ──
+    _pipe_key = f"{uploaded_file.name}|{uploaded_file.size}|{show_original}|{template_file_path}"
+    _pc = st.session_state.get("_pipe_cache")
+    if _pc and _pc.get("key") == _pipe_key:
+        (parsed_items, mapped_items, output_bytes, auto_info,
+         analyzer_qf, analyzer_scenario, analyzer_issues, labor_data) = _pc["result"]
+    else:
+        # 진행 상황 표시 (가로 막대)
+        progress = st.progress(0, text="시작...")
+
         try:
-            import tempfile, os
-            from quotation_analyzer import ExcelParser, AutoClassifier, Aggregator, Validator
-            from quotation_analyzer.models.data_models import QuotationFile
+            # Step 1: 파싱
+            progress.progress(10, text="📄 파싱 중...")
+            if uploaded_file.name.lower().endswith(".pdf"):
+                parsed_items = parse_pdf(uploaded_file)
+            else:
+                parsed_items = parse_excel(uploaded_file)
 
-            # 업로드 파일을 임시 파일로 저장 (analyzer는 파일 경로 기반)
-            tmp_analyzer = os.path.join(tempfile.gettempdir(), f"_analyzer_{uploaded_file.name}")
-            with open(tmp_analyzer, "wb") as f:
-                f.write(uploaded_file.getvalue())
-
-            a_parser = ExcelParser()
-            sheets = a_parser.list_sheets(tmp_analyzer)
-            selected_sheet = sheets[0] if sheets else ""
-            analyzer_qf = a_parser.parse_sheet(tmp_analyzer, selected_sheet, uploaded_file.name, "견적가")
-
-            if analyzer_qf.status.value != "오류":
-                a_classifier = AutoClassifier()
-                a_classifier.classify_all(analyzer_qf.items)
-                for it in analyzer_qf.items:
-                    it.final_category = it.auto_category
-
-                a_agg = Aggregator()
-                analyzer_scenario = a_agg.aggregate_scenario(
-                    name=Path(uploaded_file.name).stem,
-                    items=analyzer_qf.items,
-                )
-
-                a_validator = Validator()
-                analyzer_issues = a_validator.validate_file(analyzer_qf)
-
+            # Step 2: 매핑
+            progress.progress(30, text="🔗 매핑 중...")
+            rules = {}
+            if RULES_FILE.exists():
+                rules = json.loads(RULES_FILE.read_text(encoding="utf-8"))
+            mapper = RuleMapper(rules)
+            mapped_items = mapper.map_items(parsed_items)
+        
+            # Step 3: 원가분석툴(analyzer) 파이프라인 (분류 결과 확보)
+            progress.progress(50, text="🔍 원가분석 중...")
             try:
-                os.unlink(tmp_analyzer)
-            except OSError:
-                pass
+                import tempfile, os
+                from quotation_analyzer import ExcelParser, AutoClassifier, Aggregator, Validator
+                from quotation_analyzer.models.data_models import QuotationFile
 
-        except Exception as ae:
-            err_msg = str(ae)
-            st.error(f"원가분석 실행 중 오류: {err_msg}")
-            with st.expander("🔧 해결 방법", expanded=True):
-                if "No module named 'quotation_analyzer'" in err_msg:
-                    st.markdown("""
+                # 업로드 파일을 임시 파일로 저장 (analyzer는 파일 경로 기반)
+                tmp_analyzer = os.path.join(tempfile.gettempdir(), f"_analyzer_{uploaded_file.name}")
+                with open(tmp_analyzer, "wb") as f:
+                    f.write(uploaded_file.getvalue())
+
+                a_parser = ExcelParser()
+                sheets = a_parser.list_sheets(tmp_analyzer)
+                selected_sheet = sheets[0] if sheets else ""
+                analyzer_qf = a_parser.parse_sheet(tmp_analyzer, selected_sheet, uploaded_file.name, "견적가")
+
+                if analyzer_qf.status.value != "오류":
+                    a_classifier = AutoClassifier()
+                    a_classifier.classify_all(analyzer_qf.items)
+                    for it in analyzer_qf.items:
+                        it.final_category = it.auto_category
+
+                    a_agg = Aggregator()
+                    analyzer_scenario = a_agg.aggregate_scenario(
+                        name=Path(uploaded_file.name).stem,
+                        items=analyzer_qf.items,
+                    )
+
+                    a_validator = Validator()
+                    analyzer_issues = a_validator.validate_file(analyzer_qf)
+
+                try:
+                    os.unlink(tmp_analyzer)
+                except OSError:
+                    pass
+
+            except Exception as ae:
+                err_msg = str(ae)
+                st.error(f"원가분석 실행 중 오류: {err_msg}")
+                with st.expander("🔧 해결 방법", expanded=True):
+                    if "No module named 'quotation_analyzer'" in err_msg:
+                        st.markdown("""
 **`quotation_analyzer` 패키지가 설치되어 있지 않거나 서버가 오래된 상태로 실행 중입니다.**
 
 해결 순서:
@@ -500,8 +508,8 @@ cd C:\\AI_Agent\\quotation-form-converter
 ```
 3. 이 페이지를 새로고침 후 파일을 다시 업로드하세요.
 """)
-                elif "No module named 'plotly'" in err_msg:
-                    st.markdown("""
+                    elif "No module named 'plotly'" in err_msg:
+                        st.markdown("""
 **`plotly` 패키지가 설치되어 있지 않습니다.**
 
 해결:
@@ -511,8 +519,8 @@ cd C:\\AI_Agent\\quotation-form-converter
 ```
 그 후 Streamlit 서버를 재시작하세요.
 """)
-                else:
-                    st.markdown(f"""
+                    else:
+                        st.markdown(f"""
 **오류 내용:** `{err_msg}`
 
 해결 순서:
@@ -531,45 +539,52 @@ cd C:\\AI_Agent\\quotation-form-converter
 ```
 4. 여전히 오류가 나면 터미널의 전체 오류 메시지를 확인하세요.
 """)
+                analyzer_qf = None
+                analyzer_scenario = None
+                analyzer_issues = []
+
+            # Step 4: 분류 (템플릿 섹션별) + analyzer 분류 결과 적용
+            progress.progress(70, text="📂 분류 중...")
+            from classification import classify_items
+            mapped_items = classify_items(mapped_items)
+            _apply_analyzer_classification(mapped_items, analyzer_qf)
+            # Raw 구분 컬럼 기반 계열 재조정 (사급품 → 전장/제어 계열)
+            _adjust_family_by_gubun(mapped_items)
+            # analyzer 분류 적용 후 Unit 행 분류 재상속
+            _reinherit_unit_classification(mapped_items)
+
+            # Step 5: Excel 생성
+            progress.progress(85, text="📊 표준 양식 생성 중...")
+            auto_info = _extract_auto_info(mapped_items)
+            labor_data = _collect_labor_data(analyzer_qf)
+            output_bytes = export_standard_excel(
+                mapped_items,
+                company_name=auto_info.get("업체명", ""),
+                quote_no=auto_info.get("견적번호", ""),
+                template_file=template_file_path,
+                show_original=show_original,
+                labor_data=labor_data,
+            )
+
+            # 완료
+            progress.progress(100, text="✅ 완료!")
+
+        except Exception as e:
+            progress.progress(100, text="❌ 오류 발생")
+            st.error(f"변환 실패: {e}")
+            parsed_items = None
+            mapped_items = None
+            output_bytes = None
             analyzer_qf = None
             analyzer_scenario = None
             analyzer_issues = []
+            labor_data = None
 
-        # Step 4: 분류 (템플릿 섹션별) + analyzer 분류 결과 적용
-        progress.progress(70, text="📂 분류 중...")
-        from classification import classify_items
-        mapped_items = classify_items(mapped_items)
-        _apply_analyzer_classification(mapped_items, analyzer_qf)
-        # Raw 구분 컬럼 기반 계열 재조정 (사급품 → 전장/제어 계열)
-        _adjust_family_by_gubun(mapped_items)
-        # analyzer 분류 적용 후 Unit 행 분류 재상속
-        _reinherit_unit_classification(mapped_items)
-
-        # Step 5: Excel 생성
-        progress.progress(85, text="📊 표준 양식 생성 중...")
-        auto_info = _extract_auto_info(mapped_items)
-        labor_data = _collect_labor_data(analyzer_qf)
-        output_bytes = export_standard_excel(
-            mapped_items,
-            company_name=auto_info.get("업체명", ""),
-            quote_no=auto_info.get("견적번호", ""),
-            template_file=template_file_path,
-            show_original=show_original,
-            labor_data=labor_data,
-        )
-
-        # 완료
-        progress.progress(100, text="✅ 완료!")
-        
-    except Exception as e:
-        progress.progress(100, text="❌ 오류 발생")
-        st.error(f"변환 실패: {e}")
-        parsed_items = None
-        mapped_items = None
-        output_bytes = None
-        analyzer_qf = None
-        analyzer_scenario = None
-        analyzer_issues = []
+        st.session_state._pipe_cache = {
+            "key": _pipe_key,
+            "result": (parsed_items, mapped_items, output_bytes, auto_info,
+                       analyzer_qf, analyzer_scenario, analyzer_issues, labor_data),
+        }
 
     if parsed_items:
         st.subheader("파싱 결과 (원본)")
