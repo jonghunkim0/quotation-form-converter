@@ -269,9 +269,15 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
         ))
 
     # ── Engineering (PRI Engineering Fee) — 단가 600,000원 고정 ──
-    # 인원수: 기본 2명, 대응일수: 다른 인건비 항목 중 가장 큰 대응일수
+    # 인원수: 기본 2명, 대응일수: 섹션별(설계/조립/셋업/양산대응) 가장 긴 대응일수 합산
     eng_people = 2.0
-    eng_days = max((r.cur_days for r in model.labor_rows if r.cur_days > 0), default=0.0)
+    _eng_days = 0.0
+    for _sec in ("(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응"):
+        _sec_days = [r.cur_days for r in model.labor_rows
+                     if r.section == _sec and r.cur_days > 0]
+        if _sec_days:
+            _eng_days += max(_sec_days)
+    eng_days = _eng_days
     model.labor_rows.insert(0, LaborRow(
         section="(0) PRI Engineering", job="PRI Engineering", rate=600000,
         cur_people=eng_people, cur_days=eng_days,
