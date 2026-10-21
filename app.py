@@ -708,7 +708,7 @@ if parsed_items and mapped_items:
     # UI: 모든 셀을 동일한 고정 높이로 맞춰 좌우 행을 정렬.
     # st.columns는 컬럼별 독립 흐름이라 number_input(높음)과 텍스트(낮음)의
     # 높이 차이가 누적되어 행이 어긋난다 → 모든 셀을 _ROW_H 높이 flex 박스로 통일.
-    _ROW_H = 18
+    _ROW_H = 16
     st.markdown(
         f"""
         <style>
@@ -717,7 +717,8 @@ if parsed_items and mapped_items:
             margin: 0 !important;
         }}
         div[data-testid="stNumberInput"] input {{
-            height: 14px !important;
+            height: 12px !important;
+            line-height: 12px !important;
             padding: 0 4px !important;
             font-size: 0.9rem !important;
         }}
