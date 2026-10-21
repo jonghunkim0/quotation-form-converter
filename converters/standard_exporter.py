@@ -829,28 +829,20 @@ def _fill_labor_rows(ws, labor_data: Optional[Dict[str, Dict[str, Any]]], shift:
         spec_md, adv_md, display = _calc_labor_md_split(md, remark)
 
         if adv_row is None:
-            # 단일 행 (특수제어 등)
+            # 단일 행 (특수제어 등) — 단가(I열)는 템플릿 고정값 유지
             if spec_md > 0:
                 set_cell(spec_row, 7, spec_md)
-                set_cell(spec_row, 9, int(amt / spec_md))
             if remark:
                 set_cell(spec_row, 11, remark)
             if spec_md > 0:
                 notes.append((spec_row, f"MD={spec_md} ({display})"))
             continue
 
-        # 일액: 고급=int(A/M), 특급=나머지 (정수, 나머지는 특급에 추가)
-        if md > 0:
-            adv_rate = int(amt / md)
-            spec_rate = int((amt - adv_rate * adv_md) / spec_md) if spec_md > 0 else 0
-        else:
-            adv_rate = spec_rate = 0
+        # 단가(I열)는 템플릿 고정값 유지 — G열(MD)만 채움
         set_cell(spec_row, 7, spec_md)
-        set_cell(spec_row, 9, spec_rate)
         if remark:
             set_cell(spec_row, 11, remark)
         set_cell(adv_row, 7, adv_md)
-        set_cell(adv_row, 9, adv_rate)
         if remark:
             set_cell(adv_row, 11, remark)
         # M열 표기: 'MD=140 (4명×20일+2명×30일)'

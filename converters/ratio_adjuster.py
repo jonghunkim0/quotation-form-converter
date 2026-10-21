@@ -45,6 +45,73 @@ _LABOR_SECTION_MAP: Dict[str, Tuple[str, str]] = {
 
 SECTION_ORDER = ["(0) PRI Engineering", "(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응", "(5) 특수제어"]
 
+# ─── 표준 양식 인건비 행 정의 (템플릿 '2.상세 견적' D열 라벨 기준) ──────
+# (섹션, 라벨, 기본 단가, analyzer 카테고리, 등급)
+# 등급: spec=특급, adv=고급, mid=중급, low=초급, single=단일행
+# MD 분배: analyzer 카테고리 MD를 spec/adv 행에 분배 (mid/low는 0)
+_LABOR_TEMPLATE_ROWS: List[Tuple[str, str, float, str, str]] = [
+    ("(1) 설계",     "기구설계자(특급)",     450000, "인건비-기구 설계",       "spec"),
+    ("(1) 설계",     "기구설계자(고급)",     420000, "인건비-기구 설계",       "adv"),
+    ("(1) 설계",     "기구설계자(중급)",     400000, "인건비-기구 설계",       "mid"),
+    ("(1) 설계",     "기구설계자(초급)",     370000, "인건비-기구 설계",       "low"),
+    ("(1) 설계",     "전장설계자(특급)",     450000, "인건비-전장 설계",       "spec"),
+    ("(1) 설계",     "전장설계자(고급)",     420000, "인건비-전장 설계",       "adv"),
+    ("(1) 설계",     "전장설계자(중급)",     400000, "인건비-전장 설계",       "mid"),
+    ("(1) 설계",     "전장설계자(초급)",     370000, "인건비-전장 설계",       "low"),
+    ("(1) 설계",     "SW설계자(무관)",       450000, "인건비-제어 설계",       "single"),
+    ("(2) 조립",     "기구조립(특급)",       450000, "인건비-기구 조립",       "spec"),
+    ("(2) 조립",     "기구조립(고급)",       420000, "인건비-기구 조립",       "adv"),
+    ("(2) 조립",     "기구조립(중급)",       400000, "인건비-기구 조립",       "mid"),
+    ("(2) 조립",     "기구조립(초급)",       370000, "인건비-기구 조립",       "low"),
+    ("(2) 조립",     "제어조립(특급)",       450000, "인건비-전장/제어 조립",  "spec"),
+    ("(2) 조립",     "제어조립(고급)",       420000, "인건비-전장/제어 조립",  "adv"),
+    ("(2) 조립",     "제어조립(중급)",       400000, "인건비-전장/제어 조립",  "mid"),
+    ("(2) 조립",     "제어조립(초급)",       370000, "인건비-전장/제어 조립",  "low"),
+    ("(3) 셋업",     "셋업 기구 엔지니어(특급)",   450000, "인건비-기구 셋업",       "spec"),
+    ("(3) 셋업",     "셋업 기구 엔지니어(고급)",   420000, "인건비-기구 셋업",       "adv"),
+    ("(3) 셋업",     "셋업 기구 엔지니어(중급)",   400000, "인건비-기구 셋업",       "mid"),
+    ("(3) 셋업",     "셋업 기구 엔지니어(초급)",   370000, "인건비-기구 셋업",       "low"),
+    ("(3) 셋업",     "셋업 제어/전장 엔지니어(특급)", 450000, "인건비-전장/제어 셋업", "spec"),
+    ("(3) 셋업",     "셋업 제어/전장 엔지니어(고급)", 420000, "인건비-전장/제어 셋업", "adv"),
+    ("(3) 셋업",     "셋업 제어/전장 엔지니어(중급)", 400000, "인건비-전장/제어 셋업", "mid"),
+    ("(3) 셋업",     "셋업 제어/전장 엔지니어(초급)", 370000, "인건비-전장/제어 셋업", "low"),
+    ("(4) 양산대응", "양산 기구 엔지니어(특급)",     450000, "인건비-기구 양산대응",     "spec"),
+    ("(4) 양산대응", "양산 기구 엔지니어(고급)",     420000, "인건비-기구 양산대응",     "adv"),
+    ("(4) 양산대응", "양산 기구 엔지니어(중급)",     400000, "인건비-기구 양산대응",     "mid"),
+    ("(4) 양산대응", "양산 기구 엔지니어(초급)",     370000, "인건비-기구 양산대응",     "low"),
+    ("(4) 양산대응", "양산 제어/전장 엔지니어(특급)", 450000, "인건비-전장/제어 양산대응", "spec"),
+    ("(4) 양산대응", "양산 제어/전장 엔지니어(고급)", 420000, "인건비-전장/제어 양산대응", "adv"),
+    ("(4) 양산대응", "양산 제어/전장 엔지니어(중급)", 400000, "인건비-전장/제어 양산대응", "mid"),
+    ("(4) 양산대응", "양산 제어/전장 엔지니어(초급)", 370000, "인건비-전장/제어 양산대응", "low"),
+    ("(5) 특수제어", "제어 엔지니어(무관)",    800000, "인건비-특수제어",         "single"),
+]
+
+
+def _template_labor_rates() -> Dict[str, float]:
+    """템플릿 '2.상세 견적'에서 인건비 행의 고정 단가(I열)를 읽는다.
+    템플릿 파일이 없으면 _LABOR_TEMPLATE_ROWS의 기본 단가를 사용."""
+    from config import DEFAULT_TEMPLATE_FILE
+    from openpyxl import load_workbook
+    rates: Dict[str, float] = {}
+    try:
+        wb = load_workbook(DEFAULT_TEMPLATE_FILE, read_only=True, data_only=True)
+        ws = wb["2.상세 견적"]
+        for row in ws.iter_rows(min_row=30, max_row=90, min_col=4, max_col=9):
+            d_val = row[0].value
+            i_val = row[5].value if len(row) > 5 else None
+            if d_val is not None and i_val is not None:
+                label = str(d_val).strip()
+                if isinstance(i_val, (int, float)) and i_val > 0:
+                    rates[label] = float(i_val)
+        wb.close()
+    except Exception:
+        pass
+    # 기본 단가 병합 (템플릿에 없는 라벨은 기본값 사용)
+    for _sec, label, default_rate, _cat, _tier in _LABOR_TEMPLATE_ROWS:
+        if label not in rates:
+            rates[label] = default_rate
+    return rates
+
 
 @dataclass
 class LaborRow:
@@ -169,19 +236,36 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
     """
     model = RatioModel()
 
-    # ── 인건비 행 ──
+    # ── 인건비 행: 템플릿의 모든 인건비 행 표시 (단가=템플릿 고정값) ──
+    # analyzer 카테고리 MD를 특급/고급 행에 분배, 중급/초급은 0
+    rates = _template_labor_rates()
+    cat_md: Dict[str, float] = {}
+    cat_remark: Dict[str, str] = {}
     for cat, info in (labor_data or {}).items():
-        if cat not in _LABOR_SECTION_MAP:
-            continue
-        section, job = _LABOR_SECTION_MAP[cat]
-        md = info.get("md", 0) or 0
-        rate = info.get("rate", 0) or 0
-        remark = info.get("remark", "") or ""
-        people, days = _decompose_md(md, remark)
+        cat_md[cat] = info.get("md", 0) or 0
+        cat_remark[cat] = info.get("remark", "") or ""
+
+    # 카테고리별 특급/고급 MD 분배 (중복 계산 방지)
+    from converters.standard_exporter import _calc_labor_md_split
+    _split_cache: Dict[str, Tuple[float, float]] = {}
+    for _sec, _label, _dr, cat, tier in _LABOR_TEMPLATE_ROWS:
+        if tier in ("spec", "adv") and cat in cat_md and cat not in _split_cache:
+            _split_cache[cat] = _calc_labor_md_split(cat_md[cat], cat_remark.get(cat, ""))[:2]
+
+    for section, label, default_rate, cat, tier in _LABOR_TEMPLATE_ROWS:
+        rate = rates.get(label, default_rate)
+        md = 0.0
+        if tier == "spec":
+            md = _split_cache.get(cat, (0, 0))[0]
+        elif tier == "adv":
+            md = _split_cache.get(cat, (0, 0))[1]
+        elif tier == "single":
+            md = cat_md.get(cat, 0)
+        people, days = _decompose_md(md, cat_remark.get(cat, ""))
         model.labor_rows.append(LaborRow(
-            section=section, job=job, rate=rate,
+            section=section, job=label, rate=rate,
             cur_people=people, cur_days=days,
-            adj_people=people, adj_days=days,  # 변경은 현견적과 동일하게 시작
+            adj_people=people, adj_days=days,
         ))
 
     # ── Engineering (PRI Engineering Fee) — 단가 600,000원 고정 ──
