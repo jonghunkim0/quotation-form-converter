@@ -327,6 +327,8 @@ st.markdown(
     /* dataframe 글씨 20% 확대 (0.78→0.9rem) */
     div[data-testid="stDataFrame"] { font-size: 0.9rem !important; }
     div[data-testid="stDataFrame"] .stDataFrameResizable { font-size: 0.9rem !important; }
+    /* metric 값(업체명/특기사항, 검증 요약 수치)을 작은 글씨(0.84rem)와 동일하게 */
+    div[data-testid="stMetricValue"] { font-size: 0.84rem !important; }
     /* 버튼 패딩 축소 */
     div[data-testid="stButton"] button { padding: 0.35rem 0.8rem !important; font-size: 0.85rem !important; }
     </style>
@@ -855,8 +857,8 @@ if parsed_items and mapped_items:
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
-    # ── 견적조정 산출 버튼 ──
-    if st.button("📐 견적조정 산출", type="primary", use_container_width=True):
+    # ── 견적조정 산출 버튼 ── (다운로드 버튼과 유사한 콘텐츠 폭)
+    if st.button("📐 견적조정 산출", type="primary"):
         apply_adjustment(model, st.session_state.ratio_inputs)
         try:
             st.session_state._adj_bytes = export_adjusted_excel(output_bytes, model)
