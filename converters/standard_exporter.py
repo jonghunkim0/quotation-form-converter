@@ -727,7 +727,7 @@ def _calc_labor_md_split(md: float, remark: str):
 
     # 비고에서 인원×일수 쌍 추출: '4名x20日', '2명×30일', '1名x45日' 등
     pairs = [(int(p), int(d)) for p, d in re.findall(
-        r"(\d+)\s*[名名]\s*[xX×*]\s*(\d+)\s*[日日]", remark or "")]
+        r"(\d+)\s*[名名명]\s*[xX×*]\s*(\d+)\s*[日日일]", remark or "")]
 
     if not pairs:
         # 비고 없음: 기준 일수 후보 × 인원수로 MD 재현 (일수 작은 쪽 우선, 인원 1~10)

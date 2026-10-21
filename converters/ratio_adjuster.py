@@ -213,7 +213,7 @@ def _decompose_md(md: float, remark: str) -> Tuple[float, float]:
     if md <= 0:
         return 0.0, 0.0
     pairs = [(int(p), int(d)) for p, d in re.findall(
-        r"(\d+)\s*[名名]\s*[xX×*]\s*(\d+)\s*[日日]", remark or "")]
+        r"(\d+)\s*[名名명]\s*[xX×*]\s*(\d+)\s*[日日일]", remark or "")]
     if pairs:
         total_p = sum(p for p, _ in pairs)
         days = max(1, int(round(md / total_p)))
@@ -269,15 +269,9 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
         ))
 
     # ── Engineering (PRI Engineering Fee) — 단가 600,000원 고정 ──
-    total_labor_md = sum(info.get("md", 0) or 0 for info in (labor_data or {}).values())
-    if total_labor_md > 0:
-        if total_labor_md < 21:
-            eng_md = int(round(total_labor_md / 7.0)) * 7
-        else:
-            eng_md = int(round(total_labor_md / 30.0)) * 30
-    else:
-        eng_md = 0
-    eng_people, eng_days = _decompose_md(eng_md, "")
+    # 인원수: 기본 2명, 대응일수: 다른 인건비 항목 중 가장 큰 대응일수
+    eng_people = 2.0
+    eng_days = max((r.cur_days for r in model.labor_rows if r.cur_days > 0), default=0.0)
     model.labor_rows.insert(0, LaborRow(
         section="(0) PRI Engineering", job="PRI Engineering", rate=600000,
         cur_people=eng_people, cur_days=eng_days,
