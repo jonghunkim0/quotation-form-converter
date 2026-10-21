@@ -869,14 +869,41 @@ if parsed_items and mapped_items:
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
-    # ── 견적조정 산출 버튼 ── (다운로드 버튼과 유사한 콘텐츠 폭)
-    if st.button("📐 견적조정 산출", type="primary"):
-        apply_adjustment(model, st.session_state.ratio_inputs)
+    # ── 견적조정 산출 버튼 ── (on_click 콜백: PRI Engineering 대응일수 자동 반영)
+    def _on_calc():
+        _m = st.session_state.get("ratio_model")
+        _inputs = st.session_state.get("ratio_inputs", {})
+        if _m is None:
+            return
+        apply_adjustment(_m, _inputs)
+        # PRI Engineering 대응일수 자동 재산출:
+        # 섹션별(설계/조립/셋업/양산대응) 조정된 대응일수 중 최대값을 합산
+        _eng = next((r for r in _m.labor_rows
+                     if r.section == "(0) PRI Engineering"), None)
+        if _eng is not None:
+            _nd = 0.0
+            for _sec in ("(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응"):
+                _sd = [r.adj_days for r in _m.labor_rows
+                       if r.section == _sec and r.adj_days > 0]
+                if _sd:
+                    _nd += max(_sd)
+            _eng.adj_days = _nd
+            _kd = f"{_eng.section}|{_eng.job}|days"
+            _inputs[_kd] = _nd
+            st.session_state[f"ratio_{_kd}"] = _nd
         try:
-            st.session_state._adj_bytes = export_adjusted_excel(output_bytes, model)
+            st.session_state._adj_bytes = export_adjusted_excel(
+                st.session_state.get("_pipe_cache", {}).get("result", (None,)*8)[2], _m)
             st.session_state._adj_calculated = True
         except Exception as _ae:
             st.session_state._adj_bytes = None
+            st.session_state._adj_calculated = False
+            st.session_state._calc_err = str(_ae)
+
+    if st.button("📐 견적조정 산출", type="primary", on_click=_on_calc):
+        if st.session_state.get("_calc_err"):
+            st.warning(f"조정견적 생성 실패: {st.session_state._calc_err}")
+            st.session_state._calc_err = None
             st.session_state._adj_calculated = False
             st.warning(f"조정견적 생성 실패: {_ae}")
 
