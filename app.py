@@ -849,8 +849,7 @@ if parsed_items and mapped_items:
                 key_d = f"{r.section}|{r.job}|days"
                 ic1, ic2, ic3, ic4, ic5, ic6 = st.columns([3, 1, 1.5, 1.5, 1, 1])
                 _cell(ic1, f"{r.job} "
-                    f"<span style='color:#888;font-size:0.82rem;'>단가 {_fmt_won(r.rate)} · "
-                    f"현 MD {r.cur_md:,.0f}</span>")
+                    f"<span style='color:#888;font-size:0.82rem;'>단가 {_fmt_won(r.rate)}</span>")
                 _cell(ic2, _fmt_won(r.cur_amount))
                 new_p = ic3.number_input(
                     "대응인원수", min_value=0.0, step=1.0,
