@@ -329,6 +329,9 @@ st.markdown(
     div[data-testid="stDataFrame"] .stDataFrameResizable { font-size: 0.9rem !important; }
     /* metric 값(업체명/특기사항, 검증 요약 수치)을 작은 글씨(0.84rem)와 동일하게 */
     div[data-testid="stMetricValue"] { font-size: 0.84rem !important; }
+    /* 인건비 섹션 헤더: 상하 여백 70% 축소 */
+    div[data-testid="stMarkdownContainer"]:has(> div.sec-hdr) { margin-top: 0 !important; margin-bottom: 0 !important; }
+    div.sec-hdr { font-weight: 600; font-size: 0.9rem; line-height: 1.1; margin: 0 !important; padding: 0 !important; }
     /* 버튼 패딩 축소 */
     div[data-testid="stButton"] button { padding: 0.35rem 0.8rem !important; font-size: 0.85rem !important; }
     </style>
@@ -830,7 +833,7 @@ if parsed_items and mapped_items:
             sec_rows = [r for r in model.labor_rows if r.section == sec]
             if not sec_rows:
                 continue
-            st.markdown(f"**{sec}**")
+            st.markdown(f"<div class='sec-hdr'>{sec}</div>", unsafe_allow_html=True)
             for r in sec_rows:
                 key_p = f"{r.section}|{r.job}|people"
                 key_d = f"{r.section}|{r.job}|days"
