@@ -830,7 +830,8 @@ if parsed_items and mapped_items:
         st.info("인건비 항목이 없습니다.")
     else:
         # 헤더 행 (재료비·경비 조정과 동일 양식)
-        _lh = st.columns([3, 1, 1, 1, 1, 1])
+        # 인원수/대응일수 컬럼을 넓혀 number_input 스텝 버튼(−/+)이 표시되도록
+        _lh = st.columns([3, 1, 1.5, 1.5, 1, 1])
         _cell(_lh[0], "구분", "#888")
         _cell(_lh[1], "현견적(원)", "#888")
         _cell(_lh[2], "인원수", "#888")
@@ -846,7 +847,7 @@ if parsed_items and mapped_items:
             for r in sec_rows:
                 key_p = f"{r.section}|{r.job}|people"
                 key_d = f"{r.section}|{r.job}|days"
-                ic1, ic2, ic3, ic4, ic5, ic6 = st.columns([3, 1, 1, 1, 1, 1])
+                ic1, ic2, ic3, ic4, ic5, ic6 = st.columns([3, 1, 1.5, 1.5, 1, 1])
                 _cell(ic1, f"{r.job} "
                     f"<span style='color:#888;font-size:0.82rem;'>단가 {_fmt_won(r.rate)} · "
                     f"현 MD {r.cur_md:,.0f}</span>")
