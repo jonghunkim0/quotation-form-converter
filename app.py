@@ -932,7 +932,6 @@ if parsed_items and mapped_items:
             file_name=f"조정견적_{_adj_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
-            use_container_width=True,
         )
     else:
         st.info("📐 '견적조정 산출' 버튼을 클릭하면 조정 결과가 계산됩니다.")
