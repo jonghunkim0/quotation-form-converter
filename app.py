@@ -708,7 +708,7 @@ if parsed_items and mapped_items:
     # UI: 모든 셀을 동일한 고정 높이로 맞춰 좌우 행을 정렬.
     # st.columns는 컬럼별 독립 흐름이라 number_input(높음)과 텍스트(낮음)의
     # 높이 차이가 누적되어 행이 어긋난다 → 모든 셀을 _ROW_H 높이 flex 박스로 통일.
-    _ROW_H = 16
+    _ROW_H = 14
     st.markdown(
         f"""
         <style>
@@ -716,9 +716,17 @@ if parsed_items and mapped_items:
             height: {_ROW_H}px !important;
             margin: 0 !important;
         }}
+        /* input을 감싸는 react-aria-TextField 컨테이너(기본 32.5px)도
+           같은 높이로 맞춰야 input이 박스 중앙에 위치한다. */
+        div[data-testid="stNumberInput"] .react-aria-TextField {{
+            height: {_ROW_H}px !important;
+        }}
+        div[data-testid="stNumberInput"] .react-aria-TextField > div {{
+            height: {_ROW_H}px !important;
+        }}
         div[data-testid="stNumberInput"] input {{
-            height: 12px !important;
-            line-height: 12px !important;
+            height: {_ROW_H}px !important;
+            line-height: {_ROW_H}px !important;
             padding: 0 4px !important;
             font-size: 0.9rem !important;
         }}
