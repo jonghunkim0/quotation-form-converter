@@ -2,7 +2,14 @@
 견적 표준 양식 변환기 - 설정 파일
 """
 
+import os
 from pathlib import Path
+
+# ─── LLM (Qwen3.8 / DashScope) ─────────────────────────────────
+DASHSCOPE_API_KEY = os.environ.get(
+    "DASHSCOPE_API_KEY",
+    "sk-9370684cc9794f03b2b951b02bab8d98",
+)
 
 # ─── 표준 출력 컬럼 ─────────────────────────────────────────────
 STANDARD_COLUMNS = [

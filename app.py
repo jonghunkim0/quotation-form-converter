@@ -330,8 +330,8 @@ st.markdown(
     /* metric 값(업체명/특기사항, 검증 요약 수치)을 작은 글씨(0.84rem)와 동일하게 */
     div[data-testid="stMetricValue"] { font-size: 0.84rem !important; }
     /* 인건비 섹션 헤더: 상하 여백 70% 축소 */
-    div[data-testid="stMarkdownContainer"]:has(> div.sec-hdr) { margin-top: 0 !important; margin-bottom: 0 !important; }
-    div.sec-hdr { font-weight: 600; font-size: 0.9rem; line-height: 1.1; margin: 0 !important; padding: 0 !important; }
+    div[data-testid="stMarkdownContainer"]:has(> div.sec-hdr) { margin-top: 4px !important; margin-bottom: 2px !important; }
+    div.sec-hdr { font-weight: 600; font-size: 0.82rem; line-height: 1.1; margin: 0 !important; padding: 0 !important; }
     /* 버튼 패딩 축소 */
     div[data-testid="stButton"] button { padding: 0.35rem 0.8rem !important; font-size: 0.85rem !important; }
     </style>
@@ -433,6 +433,140 @@ if RULES_FILE.exists():
     else:
         st.sidebar.info("등록된 규칙이 없습니다.")
 
+# ─── 사이드바: 💬 분석 챗봇 (Qwen3.8) ──────────────────────────
+st.sidebar.header("💬 분석 챗봇")
+
+# 챗봇 대화 히스토리 (session_state)
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []  # [{"role": "user"|"assistant", "content": str}]
+if "chat_log" not in st.session_state:
+    st.session_state.chat_log = []  # 표시용 [(role, text)]
+
+# 챗봇 CSS
+st.sidebar.markdown(
+    """
+    <style>
+    .chat-log {
+        height: 220px; overflow-y: auto; background: #f9fafb;
+        border: 1px solid #e5e7eb; border-radius: 6px;
+        padding: 8px; margin-bottom: 6px;
+    }
+    .chat-msg {
+        max-width: 92%; padding: 5px 9px; border-radius: 9px;
+        font-size: 0.78rem; line-height: 1.45; margin-bottom: 5px;
+        word-break: keep-all; white-space: pre-wrap;
+    }
+    .chat-msg.bot {
+        background: #fff; border: 1px solid #e5e7eb;
+        border-bottom-left-radius: 3px;
+    }
+    .chat-msg.user {
+        background: #2563eb; color: #fff; margin-left: auto;
+        border-bottom-right-radius: 3px;
+    }
+    .chat-hint { font-size: 0.7rem; color: #6b7280; margin-top: 4px; line-height: 1.4; }
+    .chat-hint b { color: #374151; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# 대화 로그 표시
+_chat_html_parts = []
+for role, text in st.session_state.chat_log:
+    cls = "user" if role == "user" else "bot"
+    _chat_html_parts.append(f'<div class="chat-msg {cls}">{text}</div>')
+_chat_html = "".join(_chat_html_parts) or '<div class="chat-msg bot">안녕하세요! 견적 분석을 도와드립니다.<br>예: <b>"가공품/구매품/인건비 비율 알려줘"</b></div>'
+
+st.sidebar.markdown(
+    f'<div class="chat-log" id="chatLog">{_chat_html}</div>',
+    unsafe_allow_html=True,
+)
+
+# 입력框 (전송 후 초기화: _chat_input_next가 있으면 그 값으로 초기화)
+if "_chat_input_next" in st.session_state:
+    st.session_state.chat_input = st.session_state.pop("_chat_input_next")
+
+_chat_col1, _chat_col2 = st.sidebar.columns([4, 1])
+with _chat_col1:
+    _chat_input = st.text_input(
+        "요청 입력",
+        key="chat_input",
+        placeholder="예: 가공비 상위 10개 20% 올려줘",
+        label_visibility="collapsed",
+    )
+with _chat_col2:
+    _chat_send = st.button("전송", key="chat_send", use_container_width=True)
+
+# 사용 예시
+st.sidebar.markdown(
+    """
+    <div class="chat-hint">
+    <b>사용 예시</b><br>
+    · 가공품/구매품/인건비/기타 비율 알려줘<br>
+    · 가공비 상위 10개 항목 20% 올려줘<br>
+    · 미분류 항목 보여줘<br>
+    · 인건비 총액 알려줘<br>
+    · 경비 110%로 조정해줘
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# 전송 처리
+if _chat_send and _chat_input.strip():
+    _user_msg = _chat_input.strip()
+
+    # 데이터가 없으면 안내 (mapped_items는 파일 업로드 후 정의됨)
+    _pc_result = st.session_state.get("_pipe_cache", {}).get("result")
+    if not _pc_result or _pc_result[1] is None:
+        _bot_msg = "⚠️ 먼저 견적서 파일을 업로드하세요."
+        st.session_state.chat_log.append(("user", _user_msg))
+        st.session_state.chat_log.append(("bot", _bot_msg))
+        st.session_state.chat_history.append({"role": "user", "content": _user_msg})
+        st.session_state.chat_history.append({"role": "assistant", "content": _bot_msg})
+        st.sidebar.error(_bot_msg)
+    else:
+        # LLM 호출 (파이프라인 캐시에서 데이터 참조)
+        from chatbot import ask_chatbot, apply_actions
+
+        _pipe_result = st.session_state.get("_pipe_cache", {}).get("result", (None,)*8)
+        _mi = _pipe_result[1]   # mapped_items
+        _ld = _pipe_result[7]   # labor_data
+
+        with st.spinner("🤖 분석 중..."):
+            result = ask_chatbot(
+                user_query=_user_msg,
+                mapped_items=_mi,
+                labor_data=_ld,
+                history=st.session_state.chat_history,
+            )
+
+        _bot_msg = result.get("message", "")
+        st.session_state.chat_log.append(("user", _user_msg))
+        st.session_state.chat_log.append(("bot", _bot_msg))
+        st.session_state.chat_history.append({"role": "user", "content": _user_msg})
+        st.session_state.chat_history.append({"role": "assistant", "content": _bot_msg})
+
+        # 조정 액션 적용
+        actions = result.get("actions", [])
+        if actions and result.get("type") == "adjust":
+            # ratio_model이 있는지 확인
+            _rm = st.session_state.get("ratio_model")
+            _ri = st.session_state.get("ratio_inputs", {})
+            if _rm is not None:
+                applied = apply_actions(actions, _rm, _ri, _mi)
+                if applied:
+                    _bot_msg += "\n\n" + "\n".join(applied)
+                    # 마지막 bot 메시지 업데이트
+                    st.session_state.chat_log[-1] = ("bot", _bot_msg)
+                    st.session_state.chat_history[-1]["content"] = _bot_msg
+                    st.session_state._adj_calculated = False  # 재산출 필요
+
+        # 입력框 초기화 (rerun 후 새 값으로 초기화)
+        st.session_state["_chat_input_next"] = ""
+        st.rerun()
+
 # ─── 메인: 파일 업로드 ─────────────────────────────────────────
 st.header("1️⃣ 견적서 업로드")
 
@@ -457,7 +591,7 @@ if uploaded_file is not None:
     st.success(f"업로드됨: `{uploaded_file.name}`")
 
     # ── 파이프라인 캐시: 파일/옵션 변경 시에만 재실행 (조정 입력 시 재실행 방지) ──
-    _pipe_key = f"{uploaded_file.name}|{uploaded_file.size}|{show_original}|{template_file_path}"
+    _pipe_key = f"v2|{uploaded_file.name}|{uploaded_file.size}|{show_original}|{template_file_path}"
     _pc = st.session_state.get("_pipe_cache")
     if _pc and _pc.get("key") == _pipe_key:
         (parsed_items, mapped_items, output_bytes, auto_info,
@@ -633,13 +767,6 @@ st.header("2️⃣ 표준 양식으로 변환")
 
 if parsed_items and mapped_items:
 
-    # ─── 자동 추출 정보 표시 ───────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("업체명", auto_info.get("업체명", "-"))
-    col2.metric("견적일", auto_info.get("견적일", "-"))
-    col3.metric("통화", auto_info.get("통화", "-"))
-    col4.metric("특기사항", auto_info.get("특기사항", "-"))
-
     # ─── 매핑 결과 표시 (접힘) ─────────────────────────────────
     with st.expander(f"🔗 매핑 결과 보기 — {len(mapped_items)}개 항목", expanded=False):
         # 표시용 DataFrame (내부 필드 제외)
@@ -674,16 +801,228 @@ if parsed_items and mapped_items:
             ]
             st.dataframe(_df_for_display(df_low), width="stretch")
 
-    # 검증 결과 요약
-    st.subheader("검증 요약")
-    error_items = [i for i in mapped_items if "오류" in str(i.get("검증결과", ""))]
-    missing_items = [i for i in mapped_items if "확인 필요" in str(i.get("검증결과", ""))]
-    dup_items = [i for i in mapped_items if "중복" in str(i.get("검증결과", ""))]
-    
-    vcol1, vcol2, vcol3 = st.columns(3)
-    vcol1.metric("💰 금액 검증 오류", len(error_items))
-    vcol2.metric("❓ 확인 필요", len(missing_items))
-    vcol3.metric("🔄 중복", len(dup_items))
+    # 검증 결과 요약 (접기/펼치기)
+    with st.expander("검증 요약", expanded=False):
+        error_items = [i for i in mapped_items if "오류" in str(i.get("검증결과", ""))]
+        missing_items = [i for i in mapped_items if "확인 필요" in str(i.get("검증결과", ""))]
+        dup_items = [i for i in mapped_items if "중복" in str(i.get("검증결과", ""))]
+        
+        vcol1, vcol2, vcol3 = st.columns(3)
+        vcol1.metric("💰 금액 검증 오류", len(error_items))
+        vcol2.metric("❓ 확인 필요", len(missing_items))
+        vcol3.metric("🔄 중복", len(dup_items))
+
+    # ─── 견적 요약 (Excel에서 직접 읽기) ────────────────────────
+    from io import BytesIO as _BIO
+    from openpyxl import load_workbook as _lwb
+
+    def _read_excel_summary(xlsx_bytes: bytes) -> Dict[str, float]:
+        """Excel '2.상세 견적' 시트에서 세부 행의 G(수량)×I(단가)를 합산하여
+        소계/합계를 계산한다. J열은 수식이므로 직접 읽을 수 없으므로,
+        compute_excel_total()과 동일한 방식으로 G×I를 합산한다.
+        
+        Returns:
+            {UI_라벨: 금액} 딕셔너리
+        """
+        try:
+            wb = _lwb(_BIO(xlsx_bytes), data_only=False)
+        except Exception:
+            return {}
+        if "2.상세 견적" not in wb.sheetnames:
+            return {}
+        ws = wb["2.상세 견적"]
+
+        def _num(v) -> float:
+            if v is None:
+                return 0.0
+            if isinstance(v, (int, float)):
+                return float(v)
+            s = str(v)
+            for ch in ("₩", "원", ",", " ", "￦", "$", "€", "¥"):
+                s = s.replace(ch, "")
+            try:
+                return float(s)
+            except (ValueError, TypeError):
+                return 0.0
+
+        # 각 세부 행의 G×I를 (gubun, dangayuh, section)별로 합산
+        # key: (gubun, dangayuh, section) → sum(G*I)
+        section_sums: Dict[tuple, float] = {}
+        cur_gubun = ""
+        cur_dangayuh = ""
+        cur_section = ""
+
+        for r in range(1, ws.max_row + 1):
+            a = ws.cell(r, 1).value
+            b = ws.cell(r, 2).value
+            c = ws.cell(r, 3).value
+
+            if a is not None and str(a).strip():
+                cur_gubun = str(a).strip()
+            if b is not None and str(b).strip():
+                cur_dangayuh = str(b).strip()
+
+            cs = str(c).strip() if c is not None else ""
+
+            # 섹션 헤더 행 (C열이 "(1) 설계" 등)
+            if cs.startswith("("):
+                cur_section = cs
+                continue
+
+            # 소계/합계/Sub합계/TOTAL/합산 행 제외 (수식 행)
+            if any(k in cs for k in ("소계", "합계", "Sub합계", "TOTAL", "합산")):
+                continue
+
+            # 세부 행: G(수량) × I(단가) 합산
+            g = _num(ws.cell(r, 7).value)
+            i = _num(ws.cell(r, 9).value)
+            if g > 0 and i > 0:
+                # D열(자재명) 확인: PRI Engineering Fee 별도 처리
+                # C열이 "0)"이고 D열이 "Engineering"인 행 = PRI Engineering Fee
+                d_val = str(ws.cell(r, 4).value or "").strip()
+                if cur_gubun == "인건비" and cs == "0)" and d_val == "Engineering":
+                    key = (cur_gubun, cur_dangayuh, "__PRI__")
+                else:
+                    key = (cur_gubun, cur_dangayuh, cur_section)
+                section_sums[key] = section_sums.get(key, 0.0) + g * i
+
+        # (gubun, dangayuh, section) → UI 라벨 매핑
+        result: Dict[str, float] = {}
+        for (gubun, dangayuh, section), amount in section_sums.items():
+            if amount == 0:
+                continue
+
+            if gubun == "기구부":
+                if "구매" in dangayuh:
+                    result["기구·구매품 소계"] = result.get("기구·구매품 소계", 0.0) + amount
+                elif "가공" in dangayuh:
+                    result["기구·가공품 소계"] = result.get("기구·가공품 소계", 0.0) + amount
+            elif gubun in ("전장/제어", "전장", "제어"):
+                if "구매" in dangayuh:
+                    # 섹션 헤더로 제어/전장 구분
+                    if "제어" in section:
+                        result["제어·구매품 소계"] = result.get("제어·구매품 소계", 0.0) + amount
+                    elif "전장" in section:
+                        result["전장·구매품 소계"] = result.get("전장·구매품 소계", 0.0) + amount
+                    else:
+                        # 섹션 구분 불가: 첫 번째 = 제어, 두 번째 = 전장
+                        if "제어·구매품 소계" not in result:
+                            result["제어·구매품 소계"] = amount
+                        else:
+                            result["전장·구매품 소계"] = result.get("전장·구매품 소계", 0.0) + amount
+                elif "가공" in dangayuh:
+                    result["전장·가공품 소계"] = result.get("전장·가공품 소계", 0.0) + amount
+            elif gubun == "인건비":
+                if section == "__PRI__":
+                    result["PRI Engineering"] = result.get("PRI Engineering", 0.0) + amount
+                elif "설계" in section:
+                    result["설계 인건비"] = result.get("설계 인건비", 0.0) + amount
+                elif "셋업" in section:
+                    result["셋업 인건비"] = result.get("셋업 인건비", 0.0) + amount
+                elif "조립" in section:
+                    result["조립 인건비"] = result.get("조립 인건비", 0.0) + amount
+                elif "양산" in section or "특수" in section:
+                    result["양산대응 인건비"] = result.get("양산대응 인건비", 0.0) + amount
+            elif gubun == "경비":
+                result["경비 및 미분류"] = result.get("경비 및 미분류", 0.0) + amount
+
+        # 합계 계산
+        result["기구부 합계"] = result.get("기구·구매품 소계", 0.0) + result.get("기구·가공품 소계", 0.0)
+        result["전장/제어부 합계"] = (
+            result.get("제어·구매품 소계", 0.0)
+            + result.get("제어·가공품 소계", 0.0)
+            + result.get("전장·구매품 소계", 0.0)
+            + result.get("전장·가공품 소계", 0.0)
+        )
+        result["인건비 합계"] = (
+            result.get("PRI Engineering", 0.0)
+            + result.get("설계 인건비", 0.0)
+            + result.get("셋업 인건비", 0.0)
+            + result.get("조립 인건비", 0.0)
+            + result.get("양산대응 인건비", 0.0)
+        )
+
+        # Total 견적 = 모든 세부 행 G×I 합계 × 1.10
+        total_base = sum(section_sums.values())
+        result["Total 견적"] = total_base * 1.10
+
+        return result
+
+    _excel_summary = _read_excel_summary(output_bytes) if output_bytes else {}
+
+    _SUM_ORDER = [
+        ("기구·구매품 소계",   "sub"),
+        ("기구·가공품 소계",   "sub"),
+        ("기구부 합계",         "fam"),
+        ("제어·구매품 소계",   "sub"),
+        ("제어·가공품 소계",   "sub"),
+        ("전장·구매품 소계",   "sub"),
+        ("전장·가공품 소계",   "sub"),
+        ("전장/제어부 합계",    "fam"),
+        ("PRI Engineering",     "sub"),
+        ("설계 인건비",         "sub"),
+        ("조립 인건비",         "sub"),
+        ("셋업 인건비",         "sub"),
+        ("양산대응 인건비",     "sub"),
+        ("인건비(특급)",        "sub"),
+        ("인건비 합계",         "fam"),
+        ("경비 및 미분류",      "sub"),
+        ("Total 견적",          "total"),
+    ]
+
+    _fmt_won_s = lambda v: f"{v:,.0f}"
+
+    def _sum_row_html(ui_label: str, kind: str) -> str:
+        val = _excel_summary.get(ui_label, 0.0)
+        if kind == "sub":
+            bg, fw = "#fff", "normal"
+        elif kind == "fam":
+            bg, fw = "#ffe0b2", "bold"
+        else:
+            bg, fw = "#c8e6c9", "bold"
+        return (f"<tr style='background:{bg};'>"
+                f"<td style='border:1px solid #ccc;padding:4px 8px;font-weight:{fw};'>{ui_label}</td>"
+                f"<td style='border:1px solid #ccc;padding:4px 8px;text-align:right;font-weight:{fw};'>{_fmt_won_s(val)}</td></tr>")
+
+    # 전장/제어부 합계 기준으로 좌우 분할
+    _split_idx = next(i for i, (lbl, _) in enumerate(_SUM_ORDER) if lbl == "전장/제어부 합계")
+    _left_items = _SUM_ORDER[:_split_idx + 1]
+    _right_items = _SUM_ORDER[_split_idx + 1:]
+
+    _th_style = "border:1px solid #ccc;padding:4px 8px;background:#f5f5f5;"
+    _sum_html = "<table style='width:100%;border-collapse:collapse;font-size:0.84rem;'>"
+    # 헤더 행: 구분(왼쪽) | 구분(오른쪽) | 금액(왼쪽) | 금액(오른쪽)
+    _sum_html += f"<tr><th style='{_th_style}text-align:left;width:35%;'>구분</th>"
+    _sum_html += f"<th style='{_th_style}text-align:right;width:15%;'>금액(원)</th>"
+    _sum_html += f"<th style='{_th_style}text-align:left;width:35%;'>구분</th>"
+    _sum_html += f"<th style='{_th_style}text-align:right;width:15%;'>금액(원)</th></tr>"
+    # 데이터 행: 왼쪽 8행 + 오른쪽 9행 → 최대 9행
+    _max_rows = max(len(_left_items), len(_right_items))
+    for i in range(_max_rows):
+        _sum_html += "<tr>"
+        # 왼쪽
+        if i < len(_left_items):
+            lbl, kind = _left_items[i]
+            val = _excel_summary.get(lbl, 0.0)
+            bg, fw = ("#fff", "normal") if kind == "sub" else ("#ffe0b2", "bold") if kind == "fam" else ("#c8e6c9", "bold")
+            _sum_html += f"<td style='border:1px solid #ccc;padding:4px 8px;background:{bg};font-weight:{fw};'>{lbl}</td>"
+            _sum_html += f"<td style='border:1px solid #ccc;padding:4px 8px;text-align:right;background:{bg};font-weight:{fw};'>{_fmt_won_s(val)}</td>"
+        else:
+            _sum_html += "<td style='border:1px solid #ccc;padding:4px 8px;'></td>"
+            _sum_html += "<td style='border:1px solid #ccc;padding:4px 8px;'></td>"
+        # 오른쪽
+        if i < len(_right_items):
+            lbl, kind = _right_items[i]
+            val = _excel_summary.get(lbl, 0.0)
+            bg, fw = ("#fff", "normal") if kind == "sub" else ("#ffe0b2", "bold") if kind == "fam" else ("#c8e6c9", "bold")
+            _sum_html += f"<td style='border:1px solid #ccc;padding:4px 8px;background:{bg};font-weight:{fw};'>{lbl}</td>"
+            _sum_html += f"<td style='border:1px solid #ccc;padding:4px 8px;text-align:right;background:{bg};font-weight:{fw};'>{_fmt_won_s(val)}</td>"
+        else:
+            _sum_html += "<td style='border:1px solid #ccc;padding:4px 8px;'></td>"
+            _sum_html += "<td style='border:1px solid #ccc;padding:4px 8px;'></td>"
+        _sum_html += "</tr>"
+    _sum_html += "</table>"
+    st.markdown(_sum_html, unsafe_allow_html=True)
 
     # ─── 다운로드 ──────────────────────────────────────────────
     st.header("3️⃣ 표준 양식 다운로드")
@@ -708,7 +1047,7 @@ if parsed_items and mapped_items:
     # UI: 모든 셀을 동일한 고정 높이로 맞춰 좌우 행을 정렬.
     # st.columns는 컬럼별 독립 흐름이라 number_input(높음)과 텍스트(낮음)의
     # 높이 차이가 누적되어 행이 어긋난다 → 모든 셀을 _ROW_H 높이 flex 박스로 통일.
-    _ROW_H = 14
+    _ROW_H = 30
     st.markdown(
         f"""
         <style>
@@ -716,8 +1055,6 @@ if parsed_items and mapped_items:
             height: {_ROW_H}px !important;
             margin: 0 !important;
         }}
-        /* input을 감싸는 react-aria-TextField 컨테이너(기본 32.5px)도
-           같은 높이로 맞춰야 input이 박스 중앙에 위치한다. */
         div[data-testid="stNumberInput"] .react-aria-TextField {{
             height: {_ROW_H}px !important;
         }}
@@ -728,13 +1065,10 @@ if parsed_items and mapped_items:
             height: {_ROW_H}px !important;
             line-height: {_ROW_H}px !important;
             padding: 0 4px !important;
-            font-size: 0.9rem !important;
+            font-size: 0.84rem !important;
         }}
-        /* markdown 셀 컨테이너의 기본 margin-bottom(-16px)을 0으로 리셋.
-           이 음수 마진이 number_input(38px)과 텍스트 셀(22px)의 높이 차이를
-           만들어 행이 어긋나게 한다 → adj-cell이 포함된 컨테이너만 리셋. */
         div[data-testid="stMarkdownContainer"]:has(> div.adj-cell) {{
-            margin-bottom: 0 !important;
+            margin-bottom: 4px !important;
         }}
         </style>
         """,
@@ -745,7 +1079,7 @@ if parsed_items and mapped_items:
         """고정 높이(_ROW_H) flex 박스로 셀 렌더 → 컬럼 간 행 정렬."""
         col.markdown(
             f"<div class='adj-cell' style='height:{_ROW_H}px;display:flex;"
-            f"align-items:center;font-size:0.9rem;color:{color};'>{html}</div>",
+            f"align-items:center;font-size:0.84rem;color:{color};'>{html}</div>",
             unsafe_allow_html=True,
         )
 
@@ -774,45 +1108,51 @@ if parsed_items and mapped_items:
     _fmt_won = lambda v: f"{v:,.0f}" if v is not None else "0"
 
     # ── 1) 상단 요약: 가공품/경비 비율(%) 입력 ──
+    # 인건비 조정과 동일하게 매 행마다 새 st.columns()를 생성하여
+    # 컬럼 간 마진 누적에 의한 행 어긋남을 방지.
+    _FAM_W = [2, 1, 1.5, 1, 1]
     st.subheader("재료비·경비 조정 (변경 비율)")
-    _fam_cols = st.columns([2, 1, 1, 1, 1])
-    _cell(_fam_cols[0], "구분", "#888")
-    _cell(_fam_cols[1], "현견적(원)", "#888")
-    _cell(_fam_cols[2], "변경 비율(%)", "#b8860b")
-    _cell(_fam_cols[3], "변경(원)", "#888")
-    _cell(_fam_cols[4], "증감(원)", "#888")
+    _fh = st.columns(_FAM_W)
+    _cell(_fh[0], "구분", "#888")
+    _cell(_fh[1], "현견적(원)", "#888")
+    _cell(_fh[2], "변경 비율(%)", "#b8860b")
+    _cell(_fh[3], "변경(원)", "#888")
+    _cell(_fh[4], "증감(원)", "#888")
 
     for fam in ("기구부", "전장부", "제어부"):
         cur = model.mat_made.get(fam, 0.0)
         key = f"made|{fam}|pct"
         pct = st.session_state.ratio_inputs.get(key, 100.0)
-        _cell(_fam_cols[0], f"1. 가공품 · {fam}")
-        _cell(_fam_cols[1], _fmt_won(cur))
-        new_pct = _fam_cols[2].number_input(
+        _fc = st.columns(_FAM_W)
+        _cell(_fc[0], f"1. 가공품 · {fam}")
+        _cell(_fc[1], _fmt_won(cur))
+        new_pct = _fc[2].number_input(
             "변경 비율(%)", min_value=0.0, max_value=500.0, step=5.0, value=float(pct),
             key=f"ratio_{key}", label_visibility="collapsed",
         )
         st.session_state.ratio_inputs[key] = new_pct
         model.made_pct[fam] = new_pct
         adj = model.made_adj(fam)
-        _cell(_fam_cols[3], _fmt_won(adj))
-        _cell(_fam_cols[4], f"{adj - cur:+,.0f}", "#c0392b" if adj - cur > 0 else "#27ae60")
+        _cell(_fc[3], _fmt_won(adj))
+        _cell(_fc[4], f"{adj - cur:+,.0f}", "#c0392b" if adj - cur > 0 else "#27ae60")
 
     # 구매품 (개별 변경 불가 — 표시만)
     for fam in ("기구부", "전장부", "제어부"):
         cur = model.mat_buy.get(fam, 0.0)
         if not cur:
             continue
-        _cell(_fam_cols[0], f"2. 구매품 · {fam}")
-        _cell(_fam_cols[1], _fmt_won(cur))
-        _cell(_fam_cols[2], "개별 변경 불가", "#888")
-        _cell(_fam_cols[3], _fmt_won(cur))
-        _cell(_fam_cols[4], "0")
+        _fc = st.columns(_FAM_W)
+        _cell(_fc[0], f"2. 구매품 · {fam}")
+        _cell(_fc[1], _fmt_won(cur))
+        _cell(_fc[2], "개별 변경 불가", "#888")
+        _cell(_fc[3], _fmt_won(cur))
+        _cell(_fc[4], "0")
 
     # 경비 (비율 입력)
-    _cell(_fam_cols[0], "4. 경비")
-    _cell(_fam_cols[1], _fmt_won(model.expense))
-    exp_pct = _fam_cols[2].number_input(
+    _fc = st.columns(_FAM_W)
+    _cell(_fc[0], "4. 경비")
+    _cell(_fc[1], _fmt_won(model.expense))
+    exp_pct = _fc[2].number_input(
         "경비 변경 비율(%)", min_value=0.0, max_value=500.0, step=5.0,
         value=float(st.session_state.ratio_inputs.get("expense|pct", 100.0)),
         key="ratio_expense_pct", label_visibility="collapsed",
@@ -820,8 +1160,8 @@ if parsed_items and mapped_items:
     st.session_state.ratio_inputs["expense|pct"] = exp_pct
     model.expense_pct = exp_pct
     exp_adj = model.expense_adj()
-    _cell(_fam_cols[3], _fmt_won(exp_adj))
-    _cell(_fam_cols[4], f"{exp_adj - model.expense:+,.0f}",
+    _cell(_fc[3], _fmt_won(exp_adj))
+    _cell(_fc[4], f"{exp_adj - model.expense:+,.0f}",
           "#c0392b" if exp_adj - model.expense > 0 else "#27ae60")
 
     # ── 2) 인건비 조정: 대응인원수/대응기간 입력 ──
@@ -997,6 +1337,11 @@ if parsed_items and mapped_items:
         def _csv_to_xlsx(csv_content: str) -> bytes:
             """CSV 문자열 → Excel bytes"""
             import io as _io
+            if not csv_content or not csv_content.strip():
+                # 빈 CSV → 헤더만 있는 Excel
+                buf = BytesIO()
+                pd.DataFrame(columns=["항목"]).to_excel(buf, index=False, engine="openpyxl")
+                return buf.getvalue()
             df = pd.read_csv(_io.StringIO(csv_content), encoding="utf-8-sig")
             buf = BytesIO()
             df.to_excel(buf, index=False, engine="openpyxl")

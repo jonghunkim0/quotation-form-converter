@@ -21,3 +21,7 @@ data/custom_template.xlsx
 # OS
 Thumbs.db
 .DS_Store
+
+# debug artifacts
+data/_summary_table.png
+tests/preview_compact.html

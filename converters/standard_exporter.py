@@ -566,7 +566,7 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
                 # G(수량)=1, H(단위)=식
                 _safe_set_cell(ws, r, COL_SANGYANG, 1)
                 _safe_set_cell(ws, r, COL_DANW, "식")
-                # I(단가): 하위 세부항목 금액 합산 수식 (단가 그대로 읽지 않음)
+                # I(단가): 하위 세부항목이 있으면 합산 수식, 없으면 원본 단가 그대로
                 sub_start = r + 1
                 sub_end = None
                 for j in range(idx + 1, len(section_items)):
@@ -575,6 +575,10 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
                     sub_end = fstart + j
                 if sub_end is not None and sub_end >= sub_start:
                     _safe_set_cell(ws, r, COL_DANGA, f"=SUM(J{sub_start}:J{sub_end})")
+                else:
+                    # 하위 항목이 없는 Unit 행 → 원본 단가 그대로
+                    _safe_set_cell(ws, r, COL_DANGA, item.get("단가", ""))
+                    detail_rows.append(r)
                 # J(금액): =G*I (1 * 합산단가 = 합산금액)
                 j_cell = ws.cell(r, COL_JEOMYEOK)
                 if not isinstance(j_cell, MergedCell) and j_cell.value in (None, ""):
