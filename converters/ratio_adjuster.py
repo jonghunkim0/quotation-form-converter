@@ -157,6 +157,9 @@ class RatioModel:
     made_pct: Dict[str, float] = field(default_factory=dict)   # 가공품 {부: %}
     expense_pct: float = 100.0  # 경비 %
     expense_auto_total: Optional[float] = None  # 경비 자동산출 합계 (Site별, None이면 비율 방식)
+    # 경비 자동산출 상세: {섹션: {"site": str, "항공료": qty, "숙박비": qty, "식비/교통비": qty}}
+    # qty = 템플릿 경비 행 G열(수량)에 채울 값 (인원수 또는 인원×일수)
+    expense_site_data: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # ── 섹션별 인건비 합계 ──
     def section_sum(self, section: str, side: str = "cur") -> float:

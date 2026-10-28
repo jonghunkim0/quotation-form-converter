@@ -1426,9 +1426,28 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
                 g = new.cell(r, 7).value
                 if isinstance(g, (int, float)):
                     new.cell(r, 7).value = g * ratio
-        # 3) 경비: 단가(I열) 스케일
+        # 3) 경비: Site별 자동산출 (G+I 직접 설정) 또는 단가(I열) 스케일
         elif cur_gubun == "경비":
-            if _expense_ratio != 1.0:
+            if model.expense_site_data:
+                from config import EXPENSE_SITE_ECOL, EXPENSE_SITE_RATES
+                e_val = str(new.cell(r, 5).value or "").strip()
+                _matched = False
+                for (item, site), qty in model.expense_site_data.items():
+                    if item in d_str:
+                        keyword = EXPENSE_SITE_ECOL.get(item, {}).get(site, "")
+                        if keyword and keyword in e_val:
+                            _g = int(round(qty)) if qty == int(round(qty)) else round(qty, 1)
+                            new.cell(r, 7).value = _g
+                            new.cell(r, 9).value = float(EXPENSE_SITE_RATES[site][item])
+                            _matched = True
+                            break
+                if not _matched:
+                    # 해당 항목 유형이지만 선택된 Site가 없는 행 → 수량 0
+                    for item in ("항공료", "숙박비", "식비/교통비"):
+                        if item in d_str:
+                            new.cell(r, 7).value = 0
+                            break
+            elif _expense_ratio != 1.0:
                 i = new.cell(r, 9).value
                 if isinstance(i, (int, float)):
                     new.cell(r, 9).value = i * _expense_ratio

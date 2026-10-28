@@ -1211,7 +1211,7 @@ if parsed_items and mapped_items:
 
     # ── 3) 경비 자동산출: Site 선택 → 항공료/숙박비/식비·교통비 자동 입력 ──
     st.subheader("경비 자동산출 (Site 선택)")
-    from config import EXPENSE_SITE_RATES
+    from config import EXPENSE_SITE_RATES, EXPENSE_SECTION_MAP
     _EXP_SECS = ["설계", "조립", "셋업", "양산대응"]
     _EXP_ITEMS = ["항공료", "숙박비", "식비/교통비"]
     _EW = [2.5, 1.5, 1.5, 1.5, 1.5]
@@ -1231,11 +1231,23 @@ if parsed_items and mapped_items:
             key=f"exp_site|{_sec}",
             label_visibility="collapsed",
         )
-        # Site가 변경된 경우에만 단가표로 자동 입력 (수동 수정값 보존)
+        # Site가 변경된 경우에만 자동산출 (수동 수정값 보존)
+        # 산출 로직:
+        #   항공료     = 투입인원수 sum × 항공료단가  (한국 자사/출장 = 0)
+        #   숙박비     = 투입인원수×대응일수 sum × 숙박비단가  (한국 자사 = 0)
+        #   식비/교통비 = 투입인원수×대응일수 sum × 식비/교통비단가  (한국 자사 = 0)
         _rates = EXPENSE_SITE_RATES.get(_site)
         if _rates and st.session_state.get(f"exp_site_last|{_sec}") != _site:
+            _lab_sec = EXPENSE_SECTION_MAP[_sec]
+            _sec_rows = [r for r in model.labor_rows if r.section == _lab_sec]
+            _people_sum = sum(r.adj_people for r in _sec_rows)
+            _md_sum = sum(r.adj_md for r in _sec_rows)
             for _it in _EXP_ITEMS:
-                st.session_state[f"exp_{_it}|{_sec}"] = float(_rates[_it])
+                if _it == "항공료":
+                    _qty = _people_sum if _site not in ("한국(자사근무)", "한국(출장대응)") else 0
+                else:
+                    _qty = _md_sum if _site != "한국(자사근무)" else 0
+                st.session_state[f"exp_{_it}|{_sec}"] = _qty * float(_rates[_it])
         st.session_state[f"exp_site_last|{_sec}"] = _site
 
     # 항공료/숙박비/식비·교통비 행 (자동 입력 + 수동 수정 가능)
@@ -1284,11 +1296,28 @@ if parsed_items and mapped_items:
             _inputs[_kd] = _nd
             st.session_state[f"ratio_{_kd}"] = _nd
         # 경비 자동산출 합계 반영 (Site별 항공/숙박/식비·교통 합)
+        from config import EXPENSE_SITE_RATES, EXPENSE_SECTION_MAP
         _exp_grand = 0.0
+        # (item, site) → 총 수량 (여러 섹션이 같은 Site를 선택하면 합산)
+        _site_data: dict = {}
         for _sec in ("설계", "조립", "셋업", "양산대응"):
+            _site = st.session_state.get(f"exp_site|{_sec}", "한국(자사근무)")
+            _rates = EXPENSE_SITE_RATES.get(_site)
+            if not _rates:
+                continue  # 직접입력 → 수동 금액만 합산, 행 매핑 없음
+            _lab_sec = EXPENSE_SECTION_MAP[_sec]
+            _sec_rows = [r for r in _m.labor_rows if r.section == _lab_sec]
+            _people_sum = sum(r.adj_people for r in _sec_rows)
+            _md_sum = sum(r.adj_md for r in _sec_rows)
             for _it in ("항공료", "숙박비", "식비/교통비"):
-                _exp_grand += float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0) or 0.0)
+                _amt = float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0) or 0.0)
+                _exp_grand += _amt
+                _rate = float(_rates[_it])
+                _qty = (_amt / _rate) if _rate > 0 else 0.0
+                _key = (_it, _site)
+                _site_data[_key] = _site_data.get(_key, 0.0) + _qty
         _m.expense_auto_total = _exp_grand
+        _m.expense_site_data = _site_data
         try:
             st.session_state._adj_bytes = export_adjusted_excel(
                 st.session_state.get("_pipe_cache", {}).get("result", (None,)*8)[2], _m)
@@ -1303,7 +1332,6 @@ if parsed_items and mapped_items:
             st.warning(f"조정견적 생성 실패: {st.session_state._calc_err}")
             st.session_state._calc_err = None
             st.session_state._adj_calculated = False
-            st.warning(f"조정견적 생성 실패: {_ae}")
 
     # ── 산출 결과 (버튼 클릭 후) ──
     if st.session_state.get("_adj_calculated") and st.session_state.get("_adj_bytes"):
