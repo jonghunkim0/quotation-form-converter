@@ -1215,6 +1215,33 @@ if parsed_items and mapped_items:
     _EXP_SECS = ["설계", "조립", "셋업", "양산대응"]
     _EXP_ITEMS = ["항공료", "숙박비", "식비/교통비"]
     _EW = [2.5, 1.5, 1.5, 1.5, 1.5]
+
+    def _calc_expense_amounts(_model) -> dict:
+        """Site 선택 + 인건비 행 기준 경비 금액 산출 (UI/산출 공용)
+        항공료     = 투입인원수 sum × 항공료단가  (한국 자사/출장 = 0)
+        숙박비     = 투입인원수×대응일수 sum(MD) × 숙박비단가  (한국 자사 = 0)
+        식비/교통비 = 투입인원수×대응일수 sum(MD) × 식비/교통비단가  (한국 자사 = 0)
+        직접입력 섹션은 제외 (수동 입력만)."""
+        _res = {}
+        for _sec in _EXP_SECS:
+            _site = st.session_state.get(f"exp_site|{_sec}", "한국(자사근무)")
+            _rates = EXPENSE_SITE_RATES.get(_site)
+            if not _rates:
+                continue  # 직접입력
+            _rows = [r for r in _model.labor_rows
+                     if r.section == EXPENSE_SECTION_MAP[_sec]]
+            _people = sum(r.adj_people for r in _rows)
+            _md = sum(r.adj_md for r in _rows)
+            _res[_sec] = {
+                "항공료": _people * _rates["항공료"]
+                          if _site not in ("한국(자사근무)", "한국(출장대응)") else 0.0,
+                "숙박비": _md * _rates["숙박비"]
+                          if _site != "한국(자사근무)" else 0.0,
+                "식비/교통비": _md * _rates["식비/교통비"]
+                               if _site != "한국(자사근무)" else 0.0,
+            }
+        return _res
+
     _eh = st.columns(_EW)
     _cell(_eh[0], "구분", "#888")
     for _ci, _s in enumerate(_EXP_SECS):
@@ -1224,31 +1251,26 @@ if parsed_items and mapped_items:
     _fc = st.columns(_EW)
     _cell(_fc[0], "Site 선택")
     for _ci, _sec in enumerate(_EXP_SECS):
-        _site = _fc[_ci + 1].selectbox(
+        _fc[_ci + 1].selectbox(
             "Site 선택",
             options=list(EXPENSE_SITE_RATES.keys()) + ["직접입력"],
             index=0,
             key=f"exp_site|{_sec}",
             label_visibility="collapsed",
         )
-        # Site가 변경된 경우에만 자동산출 (수동 수정값 보존)
-        # 산출 로직:
-        #   항공료     = 투입인원수 sum × 항공료단가  (한국 자사/출장 = 0)
-        #   숙박비     = 투입인원수×대응일수 sum × 숙박비단가  (한국 자사 = 0)
-        #   식비/교통비 = 투입인원수×대응일수 sum × 식비/교통비단가  (한국 자사 = 0)
-        _rates = EXPENSE_SITE_RATES.get(_site)
-        if _rates and st.session_state.get(f"exp_site_last|{_sec}") != _site:
-            _lab_sec = EXPENSE_SECTION_MAP[_sec]
-            _sec_rows = [r for r in model.labor_rows if r.section == _lab_sec]
-            _people_sum = sum(r.adj_people for r in _sec_rows)
-            _md_sum = sum(r.adj_md for r in _sec_rows)
-            for _it in _EXP_ITEMS:
-                if _it == "항공료":
-                    _qty = _people_sum if _site not in ("한국(자사근무)", "한국(출장대응)") else 0
-                else:
-                    _qty = _md_sum if _site != "한국(자사근무)" else 0
-                st.session_state[f"exp_{_it}|{_sec}"] = _qty * float(_rates[_it])
-        st.session_state[f"exp_site_last|{_sec}"] = _site
+
+    # 자동산출: 매 렌더 재계산 (Site/인건비 변경 즉시 반영).
+    # 사용자가 수동 수정한 값(마지막 자동산출값과 다름)은 보존.
+    _exp_calc = _calc_expense_amounts(model)
+    for _sec in _EXP_SECS:
+        for _it in _EXP_ITEMS:
+            _k = f"exp_{_it}|{_sec}"
+            _bk = f"{_k}_base"
+            _new = float(_exp_calc.get(_sec, {}).get(_it, 0.0))
+            _cur = st.session_state.get(_k)
+            if _cur is None or float(_cur) == float(st.session_state.get(_bk, _new)):
+                st.session_state[_k] = _new
+                st.session_state[_bk] = _new
 
     # 항공료/숙박비/식비·교통비 행 (자동 입력 + 수동 수정 가능)
     for _it in _EXP_ITEMS:
@@ -1257,6 +1279,7 @@ if parsed_items and mapped_items:
         for _ci, _sec in enumerate(_EXP_SECS):
             _fc[_ci + 1].number_input(
                 _it, min_value=0.0, step=10000.0,
+                value=float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0)),
                 key=f"exp_{_it}|{_sec}", label_visibility="collapsed",
             )
 
