@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>경비 자동산출 — UI 미리보기</title>
+<style>
+  body {
+    font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+    background: #fff; padding: 28px 32px; font-size: 13px; color: #222;
+  }
+  h2 { font-size: 1.25rem; margin: 0 0 4px; }
+  .caption { color: #777; font-size: 0.82rem; margin-bottom: 14px; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th {
+    background: #1f618d; color: #fff; padding: 9px 10px;
+    text-align: center; font-size: 0.92rem; font-weight: 600;
+    border: 1px solid #1a5276;
+  }
+  td {
+    border: 1px solid #d5d8dc; padding: 7px 10px;
+    text-align: center; vertical-align: middle; font-size: 0.86rem;
+  }
+  td.row-label { background: #f4f6f7; font-weight: 600; text-align: center; }
+  tr.site-row td { background: #eaecee; }
+  tr.total-row td { background: #d5d8dc; font-weight: 700; }
+  tr.grand-row td { font-weight: 700; }
+  select {
+    width: 100%; padding: 4px 6px; font-size: 0.82rem;
+    border: 1px solid #bbb; border-radius: 4px; background: #fff;
+  }
+  input[type=number] {
+    width: 100%; padding: 4px 6px; font-size: 0.82rem;
+    border: 1px solid #bbb; border-radius: 4px; text-align: right;
+  }
+  .auto { color: #0066cc; font-weight: 600; }
+  .delta-up { color: #c0392b; font-weight: 600; }
+  .delta-down { color: #27ae60; font-weight: 600; }
+  .note { margin-top: 14px; color: #777; font-size: 0.78rem; line-height: 1.5; }
+  .badge {
+    display: inline-block; background: #eaf2f8; color: #1f618d;
+    border: 1px solid #aed6f1; border-radius: 10px;
+    padding: 1px 8px; font-size: 0.72rem; margin-left: 6px;
+  }
+</style>
+</head>
+<body>
+
+<h2>경비 자동산출 (Site별 자동 계산)<span class="badge">미리보기</span></h2>
+<div class="caption">
+  Site를 선택하면 항공료/숙박비/식비·교통비가 <b>자동 산출</b>됩니다.
+  직접 입력도 가능합니다. 합계/경비 합계는 자동 계산됩니다.
+</div>
+
+<table>
+  <colgroup>
+    <col style="width:14%">
+    <col style="width:17.2%"><col style="width:17.2%"><col style="width:17.2%"><col style="width:17.2%">
+  </colgroup>
+  <thead>
+    <tr>
+      <th>경비</th>
+      <th>설계</th>
+      <th>조립</th>
+      <th>셋업</th>
+      <th>양산대응</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="site-row">
+      <td class="row-label">Site 선택</td>
+      <td id="site-0"></td>
+      <td id="site-1"></td>
+      <td id="site-2"></td>
+      <td id="site-3"></td>
+    </tr>
+    <tr>
+      <td class="row-label">항공료</td>
+      <td><input type="number" id="air-0" step="10000"></td>
+      <td><input type="number" id="air-1" step="10000"></td>
+      <td><input type="number" id="air-2" step="10000"></td>
+      <td><input type="number" id="air-3" step="10000"></td>
+    </tr>
+    <tr>
+      <td class="row-label">숙박비</td>
+      <td><input type="number" id="hotel-0" step="10000"></td>
+      <td><input type="number" id="hotel-1" step="10000"></td>
+      <td><input type="number" id="hotel-2" step="10000"></td>
+      <td><input type="number" id="hotel-3" step="10000"></td>
+    </tr>
+    <tr>
+      <td class="row-label">식비/교통비</td>
+      <td><input type="number" id="food-0" step="10000"></td>
+      <td><input type="number" id="food-1" step="10000"></td>
+      <td><input type="number" id="food-2" step="10000"></td>
+      <td><input type="number" id="food-3" step="10000"></td>
+    </tr>
+    <tr class="total-row">
+      <td class="row-label" style="background:#d5d8dc">합계</td>
+      <td id="sum-0">0</td>
+      <td id="sum-1">0</td>
+      <td id="sum-2">0</td>
+      <td id="sum-3">0</td>
+    </tr>
+    <tr class="grand-row">
+      <td class="row-label">경비 합계</td>
+      <td id="grand" colspan="4">0</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  💡 <b>자동산출 로직 (예시 단가표 — 실제 값은 설정에서 변경 가능)</b><br>
+  · 한국(자사근무): 항공 0 / 숙박 0 / 식비·교통 0<br>
+  · 한국(출장대응): 항공 0 / 숙박 150,000 / 식비·교통 50,000<br>
+  · 미국: 항공 1,500,000 / 숙박 300,000 / 식비·교통 100,000<br>
+  · 폴란드: 항공 1,200,000 / 숙박 250,000 / 식비·교통 80,000<br>
+  · 중국: 항공 800,000 / 숙박 200,000 / 식비·교통 70,000<br>
+  · 직접입력: 수동 입력만 (자동값 없음)
+</div>
+
+<script>
+const SITES = {
+  "한국(자사근무)":   { air: 0,         hotel: 0,         food: 0 },
+  "한국(출장대응)":   { air: 0,         hotel: 150000,    food: 50000 },
+  "미국":             { air: 1500000,   hotel: 300000,    food: 100000 },
+  "폴란드":           { air: 1200000,   hotel: 250000,    food: 80000 },
+  "중국":             { air: 800000,    hotel: 200000,    food: 70000 },
+  "직접입력":         null,
+};
+const COLS = 4;
+const fmt = v => (v || 0).toLocaleString('ko-KR');
+
+// Site selectbox 생성
+for (let c = 0; c < COLS; c++) {
+  const sel = document.createElement('select');
+  sel.id = 'site-sel-' + c;
+  for (const s of Object.keys(SITES)) {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  }
+  sel.value = c === 0 ? '미국' : '한국(자사근무)';  // 데모: 설계=미국
+  sel.onchange = () => { autoFill(c); recalc(); };
+  document.getElementById('site-' + c).appendChild(sel);
+}
+
+function autoFill(c) {
+  const site = document.getElementById('site-sel-' + c).value;
+  const r = SITES[site];
+  if (!r) return;  // 직접입력: 기존 값 유지
+  document.getElementById('air-' + c).value = r.air;
+  document.getElementById('hotel-' + c).value = r.hotel;
+  document.getElementById('food-' + c).value = r.food;
+}
+
+function recalc() {
+  let grand = 0;
+  for (let c = 0; c < COLS; c++) {
+    const a = +document.getElementById('air-' + c).value || 0;
+    const h = +document.getElementById('hotel-' + c).value || 0;
+    const f = +document.getElementById('food-' + c).value || 0;
+    const sum = a + h + f;
+    document.getElementById('sum-' + c).textContent = fmt(sum);
+    grand += sum;
+  }
+  document.getElementById('grand').textContent = fmt(grand) + '원';
+}
+
+for (let c = 0; c < COLS; c++) {
+  autoFill(c);
+  ['air','hotel','food'].forEach(k =>
+    document.getElementById(k + '-' + c).oninput = recalc);
+}
+recalc();
+</script>
+</body>
+</html>

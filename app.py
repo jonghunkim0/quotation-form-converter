@@ -1209,6 +1209,58 @@ if parsed_items and mapped_items:
                 st.session_state.ratio_inputs[key_p] = new_p
                 st.session_state.ratio_inputs[key_d] = new_d
 
+    # ── 3) 경비 자동산출: Site 선택 → 항공료/숙박비/식비·교통비 자동 입력 ──
+    st.subheader("경비 자동산출 (Site 선택)")
+    from config import EXPENSE_SITE_RATES
+    _EXP_SECS = ["설계", "조립", "셋업", "양산대응"]
+    _EXP_ITEMS = ["항공료", "숙박비", "식비/교통비"]
+    _EW = [2.5, 1.5, 1.5, 1.5, 1.5]
+    _eh = st.columns(_EW)
+    _cell(_eh[0], "구분", "#888")
+    for _ci, _s in enumerate(_EXP_SECS):
+        _cell(_eh[_ci + 1], _s, "#888")
+
+    # Site 선택 행 (드롭다운)
+    _fc = st.columns(_EW)
+    _cell(_fc[0], "Site 선택")
+    for _ci, _sec in enumerate(_EXP_SECS):
+        _site = _fc[_ci + 1].selectbox(
+            "Site 선택",
+            options=list(EXPENSE_SITE_RATES.keys()) + ["직접입력"],
+            index=0,
+            key=f"exp_site|{_sec}",
+            label_visibility="collapsed",
+        )
+        # Site가 변경된 경우에만 단가표로 자동 입력 (수동 수정값 보존)
+        _rates = EXPENSE_SITE_RATES.get(_site)
+        if _rates and st.session_state.get(f"exp_site_last|{_sec}") != _site:
+            for _it in _EXP_ITEMS:
+                st.session_state[f"exp_{_it}|{_sec}"] = float(_rates[_it])
+        st.session_state[f"exp_site_last|{_sec}"] = _site
+
+    # 항공료/숙박비/식비·교통비 행 (자동 입력 + 수동 수정 가능)
+    for _it in _EXP_ITEMS:
+        _fc = st.columns(_EW)
+        _cell(_fc[0], _it)
+        for _ci, _sec in enumerate(_EXP_SECS):
+            _fc[_ci + 1].number_input(
+                _it, min_value=0.0, step=10000.0,
+                key=f"exp_{_it}|{_sec}", label_visibility="collapsed",
+            )
+
+    # 합계 / 경비 합계 행 (자동 계산)
+    _fc = st.columns(_EW)
+    _cell(_fc[0], "합계", "#0066cc")
+    _exp_grand = 0.0
+    for _ci, _sec in enumerate(_EXP_SECS):
+        _s = sum(float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0) or 0.0)
+                 for _it in _EXP_ITEMS)
+        _exp_grand += _s
+        _cell(_fc[_ci + 1], f"{_s:,.0f}", "#0066cc")
+    _fc = st.columns(_EW)
+    _cell(_fc[0], "경비 합계", "#0066cc")
+    _cell(_fc[1], f"{_exp_grand:,.0f}원", "#0066cc")
+
     # ── 견적조정 산출 버튼 ── (on_click 콜백: PRI Engineering 대응일수 자동 반영)
     def _on_calc():
         _m = st.session_state.get("ratio_model")
@@ -1231,6 +1283,12 @@ if parsed_items and mapped_items:
             _kd = f"{_eng.section}|{_eng.job}|days"
             _inputs[_kd] = _nd
             st.session_state[f"ratio_{_kd}"] = _nd
+        # 경비 자동산출 합계 반영 (Site별 항공/숙박/식비·교통 합)
+        _exp_grand = 0.0
+        for _sec in ("설계", "조립", "셋업", "양산대응"):
+            for _it in ("항공료", "숙박비", "식비/교통비"):
+                _exp_grand += float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0) or 0.0)
+        _m.expense_auto_total = _exp_grand
         try:
             st.session_state._adj_bytes = export_adjusted_excel(
                 st.session_state.get("_pipe_cache", {}).get("result", (None,)*8)[2], _m)

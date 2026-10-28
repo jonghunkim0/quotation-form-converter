@@ -156,6 +156,7 @@ class RatioModel:
     # 변경 비율(%) — 노란색 입력 셀 (100 = 변동 없음)
     made_pct: Dict[str, float] = field(default_factory=dict)   # 가공품 {부: %}
     expense_pct: float = 100.0  # 경비 %
+    expense_auto_total: Optional[float] = None  # 경비 자동산출 합계 (Site별, None이면 비율 방식)
 
     # ── 섹션별 인건비 합계 ──
     def section_sum(self, section: str, side: str = "cur") -> float:
@@ -175,7 +176,9 @@ class RatioModel:
         return self.mat_made.get(fam, 0.0) * self.made_pct.get(fam, 100.0) / 100.0
 
     def expense_adj(self) -> float:
-        """경비 변경 금액 = 현견적 × 비율%"""
+        """경비 변경 금액: Site별 자동산출 합계가 있으면 우선, 없으면 현견적 × 비율%"""
+        if self.expense_auto_total is not None:
+            return self.expense_auto_total
         return self.expense * self.expense_pct / 100.0
 
     def grand_total(self, side: str = "cur") -> float:
