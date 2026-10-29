@@ -679,18 +679,19 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
 
 
 # ── 인건비: analyzer 카테고리 → 템플릿 행 라벨 (특급, 특급출현순, 고급, 고급출현순) ──
-# 템플릿 라벨이 중복되는 행(예: 'SW설계자(무관)' x4, '셋업 제어/전장 엔지니어(특급)' x4)은
-# 출현 순서로 특급=1번째, 고급=2번째 행을 지정.
+# 템플릿 라벨이 중복되는 행(예: '양산 제어/전장 엔지니어(특급)' x2: 셋업 섹션+양산대응 섹션)은
+# 출현 순서로 구분. (2026-10-29: 새 템플릿에서 셋업 섹션의 '셋업 제어/전장 엔지니어' 라벨이
+# '양산 제어/전장 엔지니어'로 변경됨 → 셋업=1번째 출현, 양산대응=2번째 출현)
 _LABOR_ROW_MAP = {
     "인건비-기구 설계":        ("기구설계자(특급)", 0, "기구설계자(고급)", 0),
     "인건비-전장 설계":        ("전장설계자(특급)", 0, "전장설계자(고급)", 0),
-    "인건비-제어 설계":        ("SW설계자(무관)", 0, "SW설계자(무관)", 1),
+    "인건비-제어 설계":        ("SW설계자(무관)", 0, None, 0),
     "인건비-기구 조립":        ("기구조립(특급)", 0, "기구조립(고급)", 0),
     "인건비-전장/제어 조립":   ("제어조립(특급)", 0, "제어조립(고급)", 0),
     "인건비-기구 셋업":        ("셋업 기구 엔지니어(특급)", 0, "셋업 기구 엔지니어(고급)", 0),
-    "인건비-전장/제어 셋업":   ("셋업 제어/전장 엔지니어(특급)", 0, "셋업 제어/전장 엔지니어(특급)", 1),
+    "인건비-전장/제어 셋업":   ("양산 제어/전장 엔지니어(특급)", 0, "양산 제어/전장 엔지니어(고급)", 0),
     "인건비-기구 양산대응":    ("양산 기구 엔지니어(특급)", 0, "양산 기구 엔지니어(고급)", 0),
-    "인건비-전장/제어 양산대응": ("양산 제어/전장 엔지니어(특급)", 0, "양산 제어/전장 엔지니어(특급)", 1),
+    "인건비-전장/제어 양산대응": ("양산 제어/전장 엔지니어(특급)", 1, "양산 제어/전장 엔지니어(고급)", 1),
     "인건비-특수제어":         ("제어 엔지니어(무관)", 0, None, 0),
 }
 
@@ -752,7 +753,6 @@ def _calc_labor_md_split(md: float, remark: str):
         spec_p = math.ceil(p / 2)
         adv_p = p - spec_p
         spec_md, adv_md = spec_p * d, adv_p * d
-        spec_md += md - (spec_md + adv_md)  # 총 MD 보존 (차이 → 특급)
         return spec_md, adv_md, f"{spec_p}명×{d}일+{adv_p}명×{d}일"
 
     if len(pairs) == 1:
@@ -761,17 +761,56 @@ def _calc_labor_md_split(md: float, remark: str):
         spec_p = math.ceil(p / 2)
         adv_p = p - spec_p
         spec_md, adv_md = spec_p * d, adv_p * d
-        spec_md += md - (spec_md + adv_md)  # 총 MD 보존 (차이 → 특급)
         return spec_md, adv_md, f"{spec_p}명×{d}일+{adv_p}명×{d}일"
 
-    # 여러 표현: MD/총인원으로 평균 일수(반올림)를 공통 사용
-    total_p = sum(p for p, _ in pairs)
-    days = max(1, int(round(md / total_p)))
-    spec_p = math.ceil(total_p / 2)
-    adv_p = total_p - spec_p
-    spec_md, adv_md = spec_p * days, adv_p * days
-    spec_md += md - (spec_md + adv_md)  # 총 MD 보존 (차이 → 특급)
-    return spec_md, adv_md, f"{spec_p}명×{days}일+{adv_p}명×{days}일"
+    # 여러 표현: 비고의 인원×일수를 그대로 사용 (앞=특급, 뒤=고급)
+    spec_p, spec_d = pairs[0]
+    spec_md = spec_p * spec_d
+    if len(pairs) == 2:
+        adv_p, adv_d = pairs[1]
+        adv_md = adv_p * adv_d
+    else:
+        adv_p = sum(p for p, _ in pairs[1:])
+        adv_md = sum(p * d for p, d in pairs[1:])
+        adv_d = int(round(adv_md / adv_p)) if adv_p > 0 else 0
+    return spec_md, adv_md, f"{spec_p}명×{spec_d}일+{adv_p}명×{adv_d}일"
+
+
+def _calc_engineering_md(labor_data: Optional[Dict[str, Dict[str, Any]]]) -> float:
+    """PRI Engineering MD — UI 방식 (공유 함수).
+
+    섹션별(설계/조립/셋업/양산대응) 최대 대응일수를 합산한 뒤 2명(고정)을 곱한다.
+    build_ratio_model(UI)과 _fill_labor_rows(엑셀)이 이 함수를 함께 쓰므로
+    UI와 엑셀의 Engineering MD가 항상 동일하다.
+    """
+    from converters.ratio_adjuster import _LABOR_TEMPLATE_ROWS, _decompose_md
+    cat_md = {cat: (info.get("md", 0) or 0) for cat, info in (labor_data or {}).items()}
+    cat_remark = {cat: (info.get("remark", "") or "") for cat, info in (labor_data or {}).items()}
+    split_cache: Dict[str, Tuple[float, float, str]] = {}
+    for _sec, _label, _dr, cat, tier in _LABOR_TEMPLATE_ROWS:
+        if tier in ("spec", "adv") and cat in cat_md and cat not in split_cache:
+            split_cache[cat] = _calc_labor_md_split(cat_md[cat], cat_remark.get(cat, ""))
+    sec_max_days: Dict[str, float] = {}
+    for section, _label, _dr, cat, tier in _LABOR_TEMPLATE_ROWS:
+        if tier == "spec":
+            md = split_cache.get(cat, (0, 0, ""))[0]
+            _disp = split_cache.get(cat, (0, 0, ""))[2]
+            remark = _disp.split("+")[0] if (_disp and "+" in _disp) else ""
+        elif tier == "adv":
+            md = split_cache.get(cat, (0, 0, ""))[1]
+            _disp = split_cache.get(cat, (0, 0, ""))[2]
+            remark = _disp.split("+")[1] if (_disp and "+" in _disp) else ""
+        elif tier == "single":
+            md = cat_md.get(cat, 0)
+            remark = cat_remark.get(cat, "")
+        else:
+            continue
+        _p, days = _decompose_md(md, remark)
+        if days > 0:
+            sec_max_days[section] = max(sec_max_days.get(section, 0.0), days)
+    eng_days = sum(sec_max_days.get(s, 0.0) for s in
+                   ("(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응"))
+    return 2.0 * eng_days
 
 
 def _fill_labor_rows(ws, labor_data: Optional[Dict[str, Dict[str, Any]]], shift: int):
@@ -795,7 +834,7 @@ def _fill_labor_rows(ws, labor_data: Optional[Dict[str, Dict[str, Any]]], shift:
     from openpyxl.cell.cell import MergedCell
 
     # 인건비 영역 (템플릿 R34~R77 + 재료비 삽입 시프트)
-    lo, hi = 34 + shift, 77 + shift
+    lo, hi = 34 + shift, 74 + shift
     notes: List[tuple] = []
 
     def set_cell(r, col, val):
@@ -805,16 +844,15 @@ def _fill_labor_rows(ws, labor_data: Optional[Dict[str, Dict[str, Any]]], shift:
         if not isinstance(c, MergedCell):
             c.value = val
 
-    # ── Engineering: 전체 MD 기반 배수 반올림 ──
-    # 21일 미만 → 7(몇 주)의 배수, 21일 이상 → 30(몇 달)의 배수에 가장 가까운 값
-    total_md = sum(v.get("md", 0) or 0 for v in labor_data.values())
-    if total_md > 0:
+    # ── Engineering: UI 방식 (섹션별 최대 대응일수 합산 × 2명) ──
+    # build_ratio_model(UI)과 동일한 공유 함수 사용 → UI/엑셀 값 완전 일치
+    eng_md = int(round(_calc_engineering_md(labor_data)))
+    if eng_md > 0:
         eng_row = _find_label_row(ws, "Engineering", lo, hi)
-        if total_md < 21:
-            eng_md = int(round(total_md / 7.0)) * 7
-        else:
-            eng_md = int(round(total_md / 30.0)) * 30
         set_cell(eng_row, 7, eng_md)
+        # M열(검증결과): 'MD=164 (2명×82일)' 형식 표기 (인원 2명 고정, 일수=MD/2)
+        if eng_row is not None:
+            notes.append((eng_row, f"MD={eng_md} (2명×{int(round(eng_md / 2))}일)"))
 
     # ── 카테고리별 특급/고급 분배 (인원×일수 기준) ──
     for cat, info in labor_data.items():
@@ -1357,28 +1395,32 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
     def _made_ratio(family: str) -> float:
         return model.made_pct.get(family, 100.0) / 100.0
 
-    # 전장/제어는 시트에 통합되어 있음 → 금액 가중 평균 비율
-    _tz_made = model.mat_made.get("전장부", 0.0) + model.mat_made.get("제어부", 0.0)
-    if _tz_made > 0:
-        _tz_ratio = (
-            model.mat_made.get("전장부", 0.0) * model.made_pct.get("전장부", 100.0)
-            + model.mat_made.get("제어부", 0.0) * model.made_pct.get("제어부", 100.0)
-        ) / _tz_made / 100.0
-    else:
-        _tz_ratio = 1.0
-
     _expense_ratio = model.expense_pct / 100.0
 
-    _labor_ratio: Dict[str, float] = {}
-    for sec in SECTION_ORDER:
-        cur = model.section_sum(sec, "cur")
-        adj = model.section_sum(sec, "adj")
-        _labor_ratio[sec] = (adj / cur) if cur > 0 else 1.0
+    # ── 인건비: UI 산출값(adj_md, rate) 그대로 기록 (UI 기준 통일) ──
+    # model.labor_rows의 job = 템플릿 D열 라벨 → 행을 찾아 G=adj_md, I=rate 직접 기록.
+    # 비율 스케일링 대신 UI에서 산출한 값을 그대로 문서화하므로 UI/엑셀 완전 일치.
+    _labor_label_occ: Dict[str, int] = {}
+    for _row in model.labor_rows:
+        _label = "Engineering" if _row.job == "PRI Engineering" else _row.job
+        _occ = _labor_label_occ.get(_label, 0)
+        _labor_label_occ[_label] = _occ + 1
+        _r = _find_label_row(new, _label, 1, new.max_row, _occ)
+        if _r is None:
+            continue
+        _md = _row.adj_md
+        if _md > 0:
+            new.cell(_r, 7).value = int(round(_md)) if _md == int(round(_md)) else round(_md, 1)
+        if _row.rate > 0:
+            new.cell(_r, 9).value = _row.rate
 
-    # ── 시트 스캔: 구분/단가유형/인건비 섹션 추적 후 금액 스케일 ──
+    # ── 시트 스캔: 구분/단가유형 추적 후 재료비·경비 금액 스케일 ──
     cur_gubun = ""
     cur_dangayuh = ""
     cur_labor_sec = None
+    # 전장/제어 A블록 안 B블록(구매품/가공품) 출현 순서 카운터.
+    # 템플릿 순서: 1번째=제어부, 2번째=전장부 → 부별 ratio 적용용.
+    _tz_b_seen: Dict[str, int] = {}
 
     for r in range(1, new.max_row + 1):
         a = new.cell(r, 1).value
@@ -1388,8 +1430,12 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
 
         if a is not None and str(a).strip():
             cur_gubun = str(a).strip()
+            if cur_gubun != "전장/제어":
+                _tz_b_seen = {}  # 전장/제어 블록 벗어남 → 카운터 리셋
         if b is not None and str(b).strip():
             cur_dangayuh = str(b).strip()
+            if cur_gubun == "전장/제어":
+                _tz_b_seen[cur_dangayuh] = _tz_b_seen.get(cur_dangayuh, 0) + 1
         if cur_gubun == "인건비":
             for sec in SECTION_ORDER:
                 if sec in cs:
@@ -1402,33 +1448,24 @@ def export_adjusted_excel(base_bytes: bytes, model) -> bytes:
         if cs.startswith("("):
             continue
 
-        # D열 라벨 (Engineering 등 특정 행 식별용)
+        # D열 라벨 (경비 항목 식별용)
         d_val = new.cell(r, 4).value
         d_str = str(d_val).strip() if d_val is not None else ""
 
-        # 0) Engineering (PRI Engineering Fee): 자체 섹션 비율로 MD(G열) 스케일
-        if d_str == "Engineering":
-            ratio = _labor_ratio.get("(0) PRI Engineering", 1.0)
-            if ratio != 1.0:
-                g = new.cell(r, 7).value
-                if isinstance(g, (int, float)):
-                    new.cell(r, 7).value = g * ratio
-            continue
         # 1) 재료비·가공품: 단가(I열) 스케일 (구매품은 변경 불가)
         if cur_dangayuh == "가공품" and cur_gubun in ("기구부", "전장/제어"):
-            ratio = _made_ratio("기구부") if cur_gubun == "기구부" else _tz_ratio
+            if cur_gubun == "기구부":
+                ratio = _made_ratio("기구부")
+            else:
+                # 전장/제어: B블록 출현 순서로 부 구분 (1번째=제어부, 2번째=전장부)
+                _blk = _tz_b_seen.get(cur_dangayuh, 1)
+                _fam = "제어부" if _blk <= 1 else "전장부"
+                ratio = _made_ratio(_fam)
             if ratio != 1.0:
                 i = new.cell(r, 9).value
                 if isinstance(i, (int, float)):
                     new.cell(r, 9).value = i * ratio
-        # 2) 인건비: MD(G열) 스케일
-        elif cur_gubun == "인건비" and cur_labor_sec:
-            ratio = _labor_ratio.get(cur_labor_sec, 1.0)
-            if ratio != 1.0:
-                g = new.cell(r, 7).value
-                if isinstance(g, (int, float)):
-                    new.cell(r, 7).value = g * ratio
-        # 3) 경비: Site별 자동산출 (G+I 직접 설정) 또는 단가(I열) 스케일
+        # 2) 경비: Site별 자동산출 (G+I 직접 설정) 또는 단가(I열) 스케일
         elif cur_gubun == "경비":
             if model.expense_site_data:
                 from config import EXPENSE_SITE_ECOL, EXPENSE_SITE_RATES

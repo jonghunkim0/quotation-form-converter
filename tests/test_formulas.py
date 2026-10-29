@@ -24,9 +24,9 @@ ws2 = wb['2.상세 견적']
 print('=== 2.상세 견적 - 수식 확인 ===')
 print(f'  J9   = {ws2["J9"].value}')
 print(f'  J14  = {ws2["J14"].value}')
-print(f'  J77  = {ws2["J77"].value}')
-print(f'  J104 = {ws2["J104"].value}')
-print(f'  J107 = {ws2["J107"].value}')
+print(f'  J71  = {ws2["J71"].value}')
+print(f'  J98  = {ws2["J98"].value}')
+print(f'  J101 = {ws2["J101"].value}')
 print()
 
 # 수식 검증
@@ -35,14 +35,14 @@ checks = [
     (ws1["F19"].value, "=H24"),
     (ws1["H19"].value, "=ROUNDDOWN(D19*F19, -5)"),
     (ws1["C23"].value, "=B19"),
-    (ws1["G23"].value, "='2.상세 견적'!J107"),
+    (ws1["G23"].value, "='2.상세 견적'!J101"),
     (ws1["H23"].value, "=G23*E23"),
     (ws1["H24"].value, "=SUM(H23)"),
     (ws2["J9"].value, "=SUM(J6:J8)"),
-    (ws2["J14"].value, "=J5"),
-    (ws2["J77"].value, "=SUM(J34,J48,J57,J66,J75)"),
-    (ws2["J104"].value, "=SUM(J103,J77,J14,J33)"),
-    (ws2["J107"].value, "=SUM(J104:J106)"),
+    (ws2["J14"].value, "=G14*I14"),
+    (ws2["J71"].value, "=SUM(J31,J42,J51,J60,J69)"),
+    (ws2["J98"].value, "=SUM(J97,J71,J13,J30)"),
+    (ws2["J101"].value, "=SUM(J98:J100)"),
 ]
 
 all_pass = True

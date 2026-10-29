@@ -71,10 +71,12 @@ _LABOR_TEMPLATE_ROWS: List[Tuple[str, str, float, str, str]] = [
     ("(3) 셋업",     "셋업 기구 엔지니어(고급)",   420000, "인건비-기구 셋업",       "adv"),
     ("(3) 셋업",     "셋업 기구 엔지니어(중급)",   400000, "인건비-기구 셋업",       "mid"),
     ("(3) 셋업",     "셋업 기구 엔지니어(초급)",   370000, "인건비-기구 셋업",       "low"),
-    ("(3) 셋업",     "셋업 제어/전장 엔지니어(특급)", 450000, "인건비-전장/제어 셋업", "spec"),
-    ("(3) 셋업",     "셋업 제어/전장 엔지니어(고급)", 420000, "인건비-전장/제어 셋업", "adv"),
-    ("(3) 셋업",     "셋업 제어/전장 엔지니어(중급)", 400000, "인건비-전장/제어 셋업", "mid"),
-    ("(3) 셋업",     "셋업 제어/전장 엔지니어(초급)", 370000, "인건비-전장/제어 셋업", "low"),
+    # 2026-10-29: 새 템플릿에서 셋업 섹션의 '셋업 제어/전장 엔지니어' 라벨이
+    # '양산 제어/전장 엔지니어'로 변경됨 (양산대응 섹션과 동일 라벨, 출현 순서로 구분)
+    ("(3) 셋업",     "양산 제어/전장 엔지니어(특급)", 450000, "인건비-전장/제어 셋업", "spec"),
+    ("(3) 셋업",     "양산 제어/전장 엔지니어(고급)", 420000, "인건비-전장/제어 셋업", "adv"),
+    ("(3) 셋업",     "양산 제어/전장 엔지니어(중급)", 400000, "인건비-전장/제어 셋업", "mid"),
+    ("(3) 셋업",     "양산 제어/전장 엔지니어(초급)", 370000, "인건비-전장/제어 셋업", "low"),
     ("(4) 양산대응", "양산 기구 엔지니어(특급)",     450000, "인건비-기구 양산대응",     "spec"),
     ("(4) 양산대응", "양산 기구 엔지니어(고급)",     420000, "인건비-기구 양산대응",     "adv"),
     ("(4) 양산대응", "양산 기구 엔지니어(중급)",     400000, "인건비-기구 양산대응",     "mid"),
@@ -252,22 +254,29 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
         cat_remark[cat] = info.get("remark", "") or ""
 
     # 카테고리별 특급/고급 MD 분배 (중복 계산 방지)
-    from converters.standard_exporter import _calc_labor_md_split
-    _split_cache: Dict[str, Tuple[float, float]] = {}
+    from converters.standard_exporter import _calc_labor_md_split, _calc_engineering_md
+    _split_cache: Dict[str, Tuple[float, float, str]] = {}
     for _sec, _label, _dr, cat, tier in _LABOR_TEMPLATE_ROWS:
         if tier in ("spec", "adv") and cat in cat_md and cat not in _split_cache:
-            _split_cache[cat] = _calc_labor_md_split(cat_md[cat], cat_remark.get(cat, ""))[:2]
+            _split_cache[cat] = _calc_labor_md_split(cat_md[cat], cat_remark.get(cat, ""))
 
     for section, label, default_rate, cat, tier in _LABOR_TEMPLATE_ROWS:
         rate = rates.get(label, default_rate)
         md = 0.0
+        _decompose_remark = cat_remark.get(cat, "")
         if tier == "spec":
-            md = _split_cache.get(cat, (0, 0))[0]
+            md = _split_cache.get(cat, (0, 0, ""))[0]
+            _display = _split_cache.get(cat, (0, 0, ""))[2]
+            if _display and "+" in _display:
+                _decompose_remark = _display.split("+")[0]
         elif tier == "adv":
-            md = _split_cache.get(cat, (0, 0))[1]
+            md = _split_cache.get(cat, (0, 0, ""))[1]
+            _display = _split_cache.get(cat, (0, 0, ""))[2]
+            if _display and "+" in _display:
+                _decompose_remark = _display.split("+")[1]
         elif tier == "single":
             md = cat_md.get(cat, 0)
-        people, days = _decompose_md(md, cat_remark.get(cat, ""))
+        people, days = _decompose_md(md, _decompose_remark)
         model.labor_rows.append(LaborRow(
             section=section, job=label, rate=rate,
             cur_people=people, cur_days=days,
@@ -275,15 +284,10 @@ def build_ratio_model(labor_data: Dict[str, Dict[str, Any]],
         ))
 
     # ── Engineering (PRI Engineering Fee) — 단가 600,000원 고정 ──
-    # 인원수: 기본 2명, 대응일수: 섹션별(설계/조립/셋업/양산대응) 가장 긴 대응일수 합산
+    # 인원수: 2명 고정, 대응일수: 섹션별(설계/조립/셋업/양산대응) 최대 대응일수 합산
+    # _calc_engineering_md(공유 함수) 사용 → 엑셀 _fill_labor_rows와 값 완전 일치
     eng_people = 2.0
-    _eng_days = 0.0
-    for _sec in ("(1) 설계", "(2) 조립", "(3) 셋업", "(4) 양산대응"):
-        _sec_days = [r.cur_days for r in model.labor_rows
-                     if r.section == _sec and r.cur_days > 0]
-        if _sec_days:
-            _eng_days += max(_sec_days)
-    eng_days = _eng_days
+    eng_days = _calc_engineering_md(labor_data) / eng_people
     model.labor_rows.insert(0, LaborRow(
         section="(0) PRI Engineering", job="PRI Engineering", rate=600000,
         cur_people=eng_people, cur_days=eng_days,
