@@ -6,9 +6,10 @@
 import streamlit as st
 import pandas as pd
 import json
+import copy
 from io import BytesIO
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from config import (
     STANDARD_COLUMNS,
@@ -302,15 +303,23 @@ def _sp_metric(label: str, val, color: str = "") -> None:
 
 
 @st.dialog("📐 구매품 사내 표준단가 반영", width="large")
-def _sp_dialog(mapped_items: List[Dict[str, Any]], source_name: str) -> None:
+def _sp_dialog(
+    mapped_items: List[Dict[str, Any]], source_name: str,
+    output_bytes: bytes, auto_info: Dict[str, str],
+    template_file_path: str, show_original: bool,
+    labor_data, _pipe_key: str,
+) -> None:
     """구매품 사내 표준단가 검증·반영 모달."""
     st.caption(
         "기구_구매품 · 제어_구매품 · 전장_구매품(사급품 포함)을 추출해 "
         "사내 시스템 표준단가로 검증·반영합니다."
     )
 
-    # ── Step 1: 대상 구매품 추출 ──
-    items = _sp.extract_purchase_items(mapped_items)
+    # ── Step 1: 대상 구매품 추출 (원본 단가 기준) ──
+    # 표준단가 반영 후 mapped_items 단가가 수정되므로, 기존단가 표시는
+    # 항상 원본(_sp_base_items) 기준으로 추출한다.
+    _base_items = st.session_state.get("_sp_base_items") or mapped_items
+    items = _sp.extract_purchase_items(_base_items)
     if not items:
         st.warning("대상 구매품(기구/제어/전장_구매품)이 없습니다.")
         if st.button("닫기", key="sp_close_empty"):
@@ -369,9 +378,36 @@ def _sp_dialog(mapped_items: List[Dict[str, Any]], source_name: str) -> None:
             st.warning("결과 파일에서 표준단가 데이터를 찾지 못했습니다.")
         else:
             result = _sp.match_and_apply(items, results)
+            st.session_state["_sp_result"] = result  # 메인 화면 반영 여부 표시용
             s = result["summary"]
 
+            # ── 표준단가 반영 버튼 ("4. 표준단가 반영 결과" 위) ──
+            # 클릭 시 mapped_items 단가를 표준단가로 교체하고
+            # 표준 양식 Excel(output_bytes)을 재생성한다.
+            # 수정이 필요하면 단가비교 Excel의 M열 견적기준가를 수정해
+            # 상단 '표준단가 확인 결과 Excel 업로드'에 재업로드 후 다시 클릭.
+            st.markdown("---")
+            if st.button("✅ 표준단가 반영 (표준 양식 Excel에 적용)", type="primary", key="sp_apply_in_dialog"):
+                output_bytes = _apply_standard_prices(
+                    mapped_items, output_bytes, auto_info,
+                    template_file_path, show_original, labor_data, _pipe_key,
+                )
+                st.session_state["_sp_applied"] = True
+                st.success("표준단가를 표준 양식 Excel에 반영했습니다. '3️⃣ 표준 양식 다운로드'에서 확인하세요.")
+
             st.subheader("4. 표준단가 반영 결과")
+
+            # 기존파일의단가 vs. 표준견적 반영단가 비교 Excel 내보내기
+            _cmp_bytes = _sp.build_price_compare_excel(result, source_name)
+            st.download_button(
+                "⬇️ 기존단가 vs. 표준견적 반영단가 비교 Excel 내보내기",
+                data=_cmp_bytes,
+                file_name=f"단가비교_{source_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="sp_dl_compare",
+            )
+
             c1, c2, c3, c4 = st.columns(4)
             _sp_metric("요청 대상", s["total"], "#1f618d")
             _sp_metric("반영 완료", s["applied"], "#27ae60")
@@ -458,6 +494,71 @@ def _sp_dialog(mapped_items: List[Dict[str, Any]], source_name: str) -> None:
     if st.button("닫기", key="sp_close"):
         st.session_state.pop("_sp_open", None)
         st.rerun()
+
+
+def _apply_standard_prices(
+    mapped_items: List[Dict[str, Any]],
+    output_bytes: bytes,
+    auto_info: Dict[str, str],
+    template_file_path: str,
+    show_original: bool,
+    labor_data,
+    _pipe_key: str,
+    compare_prices: Optional[Dict[str, float]] = None,
+) -> bytes:
+    """표준단가를 mapped_items에 적용하고 output_bytes를 재생성한다.
+
+    Args:
+        compare_prices: 재업로드된 단가비교 파일에서 추출한 {식별번호: 견적기준가}.
+            None이면 _sp_result의 applied/unchanged 표준단가를 사용.
+            제공되면 해당 식별번호 품목은 compare_prices 단가로,
+            나머지는 _sp_result 표준단가로 적용.
+    """
+    _sp_res = st.session_state.get("_sp_result")
+    if _sp_res is None:
+        return output_bytes
+    _base = st.session_state.get("_sp_base_items")
+    if _base is None:
+        return output_bytes
+
+    # 1) 원본 단가로 복원
+    for m, base in zip(mapped_items, _base):
+        m["단가"] = base["단가"]
+
+    # 2) 표준단가 적용
+    _applied_count = 0
+    for r in _sp_res.get("applied", []) + _sp_res.get("unchanged", []):
+        _target_row = r.get("_row")
+        _target_src = r.get("_출처", "")
+        _price = r["표준단가"]
+        # 재업로드 단가비교 파일의 견적기준가가 있으면 우선 사용
+        if compare_prices and r["id"] in compare_prices:
+            _price = compare_prices[r["id"]]
+        for m in mapped_items:
+            if m.get("_행") == _target_row and m.get("_출처", "") == _target_src:
+                m["단가"] = _price
+                _applied_count += 1
+                break
+
+    if _applied_count == 0:
+        return output_bytes
+
+    # 3) output_bytes 재생성
+    output_bytes = export_standard_excel(
+        mapped_items,
+        company_name=auto_info.get("업체명", ""),
+        quote_no=auto_info.get("견적번호", ""),
+        template_file=template_file_path,
+        show_original=show_original,
+        labor_data=labor_data,
+    )
+    # 4) 파이프라인 캐시 갱신
+    _pc = st.session_state.get("_pipe_cache")
+    if _pc and _pc.get("key") == _pipe_key:
+        _res = list(_pc["result"])
+        _res[2] = output_bytes
+        _pc["result"] = tuple(_res)
+    return output_bytes
 
 
 # ─── 페이지 설정 ───────────────────────────────────────────────
@@ -769,6 +870,10 @@ if uploaded_file is not None:
         (parsed_items, mapped_items, output_bytes, auto_info,
          analyzer_qf, analyzer_scenario, analyzer_issues, labor_data) = _pc["result"]
     else:
+        # 새 파일/설정 변경 → 이전 표준단가 반영 상태 초기화
+        st.session_state.pop("_sp_result", None)
+        st.session_state.pop("_sp_base_items", None)
+        st.session_state.pop("_sp_applied", None)
         # 진행 상황 표시 (가로 막대)
         progress = st.progress(0, text="시작...")
 
@@ -922,6 +1027,9 @@ cd C:\\AI_Agent\\quotation-form-converter
             "result": (parsed_items, mapped_items, output_bytes, auto_info,
                        analyzer_qf, analyzer_scenario, analyzer_issues, labor_data),
         }
+        # 원본 mapped_items 딥카피 (표준단가 반영 시 복원 기준).
+        # 새 파일/설정 변경 시에만 갱신되어 항상 원본 단가를 보존한다.
+        st.session_state["_sp_base_items"] = copy.deepcopy(mapped_items)
 
     if parsed_items:
         with st.expander(f"🔍 파싱 결과 (원본) 보기 — {len(parsed_items)}개 항목", expanded=False):
@@ -1216,6 +1324,41 @@ if parsed_items and mapped_items:
         "🩶 단가는 분석 결과 자동 반영. MD = 인원수 × 대응기간, 금액 = MD × 단가."
     )
 
+    # ─── 4-1. 구매품 사내 표준단가 반영 (캡션 바로 아래 배치) ──────
+    # 반영 여부 상태 배지: 다이얼로그에서 표준단가 반영을 마무리하면
+    # _sp_result가 저장됨 → 미반영/매칭확인 항목이 없으면 "반영 완료",
+    # 있으면 "미반영 상태". 아직 반영 전이면 "미반영 상태".
+    _sp_res = st.session_state.get("_sp_result")
+    if _sp_res is not None:
+        _sp_pending = len(_sp_res.get("missed", [])) + len(_sp_res.get("match_check", []))
+        _sp_done = _sp_pending == 0
+    else:
+        _sp_done = False
+    _sp_badge = (
+        "✅ 사내 표준단가 반영 완료" if _sp_done
+        else "⚠️ 표준단가 미반영 상태"
+    )
+    _sp_color = "#27ae60" if _sp_done else "#c0392b"
+    _sp_bg = "#eafaf1" if _sp_done else "#fdedec"
+    _sp_border = "#a9dfbf" if _sp_done else "#f5b7b1"
+
+    _sp_cols = st.columns([1, 1.4])
+    if _sp_cols[0].button("📐 구매품 사내 표준단가 반영", type="primary"):
+        st.session_state["_sp_open"] = True
+    _sp_cols[1].markdown(
+        f"<div style='display:flex;align-items:center;justify-content:center;"
+        f"border:1px solid {_sp_border};background:{_sp_bg};border-radius:8px;"
+        f"padding:8px 12px;font-size:0.9rem;font-weight:700;"
+        f"color:{_sp_color};'>{_sp_badge}</div>",
+        unsafe_allow_html=True,
+    )
+    if st.session_state.get("_sp_open"):
+        _sp_dialog(
+            mapped_items, uploaded_file.name,
+            output_bytes, auto_info, template_file_path,
+            show_original, labor_data, _pipe_key,
+        )
+
     # UI: 모든 셀을 동일한 고정 높이로 맞춰 좌우 행을 정렬.
     # st.columns는 컬럼별 독립 흐름이라 number_input(높음)과 텍스트(낮음)의
     # 높이 차이가 누적되어 행이 어긋난다 → 모든 셀을 _ROW_H 높이 flex 박스로 통일.
@@ -1445,13 +1588,15 @@ if parsed_items and mapped_items:
                 st.session_state[_bk] = _new
 
     # 항공료/숙박비/식비·교통비 행 (자동 입력 + 수동 수정 가능)
+    # value= 파라미터를 전달하지 않음: 위젯 생성 직전에 session state에
+    # 이미 값이 설정되어 있어 value=를 함께 쓰면 Streamlit이
+    # "default value + Session State API 중복" 경고를 발생시킨다.
     for _it in _EXP_ITEMS:
         _fc = st.columns(_EW)
         _cell(_fc[0], _it)
         for _ci, _sec in enumerate(_EXP_SECS):
             _fc[_ci + 1].number_input(
                 _it, min_value=0.0, step=10000.0,
-                value=float(st.session_state.get(f"exp_{_it}|{_sec}", 0.0)),
                 key=f"exp_{_it}|{_sec}", label_visibility="collapsed",
             )
 
@@ -1592,12 +1737,6 @@ if parsed_items and mapped_items:
         )
     else:
         st.info("📐 '견적조정 산출' 버튼을 클릭하면 조정 결과가 계산됩니다.")
-
-    # ─── 4-1. 구매품 사내 표준단가 반영 ──────────────────────
-    if st.button("📐 구매품 사내 표준단가 반영", type="secondary"):
-        st.session_state["_sp_open"] = True
-    if st.session_state.get("_sp_open"):
-        _sp_dialog(mapped_items, uploaded_file.name)
 
     # ─── 5. 분석 결과 내보내기 (원가분석툴과 동일 문서) ──────────
     st.header("5️⃣ 분석 결과 내보내기")

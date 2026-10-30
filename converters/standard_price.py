@@ -41,7 +41,12 @@ _RESULT_COL_ALIASES = {
     "모델명": ["모델명", "model", "model no", "model no."],
     "규격": ["규격", "spec", "specification", "사양"],
     "단위": ["단위", "uom"],
-    "표준단가": ["표준단가", "개발단가", "개발 단가", "standard price", "std price", "단가"],
+    # 재업로드 결과 파일의 '견적기준가'(M열)를 최우선으로 반영:
+    # 사용자가 사내 시스템에서 확인한 견적기준가를 해당 구매품 단가로 적용.
+    # 주의: 실제 헤더는 '견적기준가'(견적+기준+가)이며, '기준견적가'와 단어 순서가
+    # 다르다. 둘 다 alias에 포함하되 '견적기준가'를 최우선으로 둬야 '개발단가'(J열,
+    # 0원)가 먼저 매핑되는 것을 막을 수 있다.
+    "표준단가": ["견적기준가", "기준견적가", "표준단가", "개발단가", "개발 단가", "standard price", "std price", "단가"],
     "통화": ["통화", "currency"],
     "기준일": ["단가 기준일", "기준일", "price date", "date"],
     "적용단위": ["단가 적용 단위", "적용단위", "price unit"],
@@ -571,6 +576,167 @@ def build_result_excel(result: Dict[str, Any], source_name: str) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ─── 5-1단계: 기존단가 vs 표준단가 비교 Excel ─────────────────
+def build_price_compare_excel(result: Dict[str, Any], source_name: str) -> bytes:
+    """'기존파일의단가 vs. 표준견적 반영단가' 비교 Excel을 만든다.
+
+    모든 대상 구매품(반영/변경없음/미반영/매칭확인)을 한 시트에 나열해
+    기존 단가·금액과 표준단가(반영단가)·금액, 증감액·증감률을 비교한다.
+    미반영/매칭확인 품목은 표준단가가 적용되지 않아 반영단가=기존단가,
+    증감 0으로 표시하고 결과 열에 사유를 기록한다.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "단가비교"
+
+    hdr_fill = PatternFill("solid", fgColor="1F618D")
+    hdr_font = Font(color="FFFFFF", bold=True)
+    green_fill = PatternFill("solid", fgColor="D5F5E3")   # 반영 완료
+    blue_fill = PatternFill("solid", fgColor="EBF5FB")    # 변경 없음
+    red_fill = PatternFill("solid", fgColor="FDEDEC")     # 미반영
+    amber_fill = PatternFill("solid", fgColor="FEF5E7")   # 매칭확인
+
+    # M열(13열) '견적기준가': 적용할 단가 (사용자 수정 가능).
+    # 반영/변경없음 품목은 표준단가 사전 입력, 미반영/매칭확인 품목은 공란으로
+    # 두어 사용자가 단가를 채워 재업로드하면 그 단가가 반영된다.
+    headers = [
+        "식별번호", "구분", "품명", "Maker", "규격", "사급", "수량",
+        "기존 단가", "기존 금액",
+        "표준(반영) 단가", "표준(반영) 금액",
+        "단가 증감", "견적기준가", "금액 증감", "증감률(%)", "결과",
+    ]
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(1, c, h)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+        cell.alignment = Alignment(horizontal="center")
+
+    def _row(r, std_price, std_amount, status, fill, apply_price):
+        old_price = r["기존단가"]
+        old_amount = r["수량"] * old_price
+        d_price = std_price - old_price
+        d_amount = std_amount - old_amount
+        pct = round((d_price / old_price * 100.0), 2) if old_price > 0 else "비교 불가"
+        vals = [
+            r["id"], r["구분"], r["품명"], r["Maker"], r["규격"], r["사급"],
+            r["수량"], old_price, old_amount,
+            std_price, std_amount,
+            d_price, apply_price, d_amount, pct, status,
+        ]
+        return vals, fill
+
+    rows = []
+    fills = []
+    # 반영 완료
+    for r in result["applied"]:
+        rows.append(_row(r, r["표준단가"], r["변경후금액"], "표준단가 반영 완료", green_fill,
+                         r["표준단가"])[0])
+        fills.append(green_fill)
+    # 변경 없음
+    for r in result["unchanged"]:
+        rows.append(_row(r, r["표준단가"], r["변경후금액"], "확인 완료-단가 변경 없음", blue_fill,
+                         r["표준단가"])[0])
+        fills.append(blue_fill)
+    # 미반영 (표준단가 미적용 → 기존단가 유지, 견적기준가는 공란으로 사용자 입력 대기)
+    for r in result["missed"]:
+        rows.append(_row(r, r["기존단가"], r["수량"] * r["기존단가"],
+                         f"미반영: {r.get('미반영사유', '')}", red_fill, None)[0])
+        fills.append(red_fill)
+    # 매칭 확인 필요 (표준단가 미적용 → 기존단가 유지, 견적기준가는 공란으로 사용자 입력 대기)
+    for r in result["match_check"]:
+        rows.append(_row(r, r["기존단가"], r["수량"] * r["기존단가"],
+                         f"매칭 확인 필요: {r.get('사유', '')}", amber_fill, None)[0])
+        fills.append(amber_fill)
+
+    for ri, row in enumerate(rows, 2):
+        for c, v in enumerate(row, 1):
+            ws.cell(ri, c, v)
+        if fills:
+            for c in range(1, len(headers) + 1):
+                ws.cell(ri, c).fill = fills[ri - 2]
+
+    # 합계 행
+    if rows:
+        hr = len(rows) + 2
+        old_amt_sum = sum(r[8] for r in rows)
+        new_amt_sum = sum(r[10] for r in rows)
+        total_row = ["합계", "", "", "", "", "", "", "", old_amt_sum,
+                     "", new_amt_sum, "", "", new_amt_sum - old_amt_sum, "", ""]
+        for c, v in enumerate(total_row, 1):
+            cell = ws.cell(hr, c, v)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor="D6EAF8")
+
+    # 열 너비
+    widths = [12, 12, 28, 14, 24, 8, 8, 14, 16, 16, 16, 14, 16, 16, 12, 26]
+    for c, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(1, c).column_letter].width = w
+    ws.freeze_panes = "A2"
+
+    # 헤더 행 필터(▼) 적용: 데이터 행만 포함 (합계 행 제외)
+    if rows:
+        last_col_letter = ws.cell(1, len(headers)).column_letter
+        ws.auto_filter.ref = f"A1:{last_col_letter}{len(rows) + 1}"
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ─── 5-2단계: 단가비교 파일 재업로드 파싱 ─────────────────────
+def parse_compare_file(xlsx_bytes: bytes) -> Dict[str, float]:
+    """재업로드된 단가비교 파일을 파싱해 {식별번호: 견적기준가}를 반환한다.
+
+    사용자가 단가비교 Excel의 M열 '견적기준가'를 수정해 재업로드하면,
+    이 함수가 식별번호별 적용 단가를 추출한다. 견적기준가가 유효한
+    숫자인 행만 포함한다 (공란/숫자 아님 행은 제외).
+    """
+    wb = load_workbook(BytesIO(xlsx_bytes), data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        wb.close()
+        return {}
+
+    # 헤더 행 탐색 (첫 10행 중 '식별번호'+'견적기준가' 포함 행)
+    header_idx = None
+    for i, row in enumerate(rows[:10]):
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        if any("식별번호" in c for c in cells) and any("견적기준가" in c for c in cells):
+            header_idx = i
+            break
+    if header_idx is None:
+        wb.close()
+        return {}
+    headers = [str(c).strip() if c is not None else "" for c in rows[header_idx]]
+    id_idx = next((i for i, h in enumerate(headers) if "식별번호" in h), None)
+    price_idx = next((i for i, h in enumerate(headers) if "견적기준가" in h), None)
+    if id_idx is None or price_idx is None:
+        wb.close()
+        return {}
+
+    out: Dict[str, float] = {}
+    for row in rows[header_idx + 1:]:
+        if row is None:
+            continue
+        id_val = row[id_idx] if id_idx < len(row) else None
+        price_val = row[price_idx] if price_idx < len(row) else None
+        if id_val is None:
+            continue
+        m = re.search(r"(MECH|CTRL|ELEC)-\d{4}", str(id_val))
+        if not m:
+            continue
+        price = _parse_price(price_val)
+        if price is None:
+            continue
+        out[m.group(0)] = price
+    wb.close()
+    return out
 
 
 def _basis_text(result: Dict[str, Any], source_name: str) -> List[str]:
