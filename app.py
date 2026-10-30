@@ -15,10 +15,12 @@ from config import (
     COLUMN_MAPPING_RULES,
     RULES_FILE,
     DEFAULT_TEMPLATE_FILE,
+    STANDARD_PRICE_TEMPLATE_FILE,
     CONFIDENCE_THRESHOLD,
 )
 from parsers import parse_pdf, parse_excel
 from converters import RuleMapper, export_standard_excel
+from converters import standard_price as _sp
 
 
 def _df_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -286,6 +288,176 @@ def _reinherit_unit_classification(items):
             most_common = Counter(sub_sections).most_common(1)[0][0]
             item["_분류"] = most_common
             item["_분류_이유"] = f"Unit 합산 행 → 하위 항목 분류 상속: {most_common}"
+
+
+# ─── 구매품 사내 표준단가 반영 (st.dialog) ─────────────────────
+def _sp_metric(label: str, val, color: str = "") -> None:
+    _c = f"color:{color};" if color else ""
+    st.markdown(
+        f"<div style='border:1px solid #d5d8dc;border-radius:8px;padding:10px 12px;'>"
+        f"<div style='font-size:0.78rem;color:#888;'>{label}</div>"
+        f"<div style='font-size:1.25rem;font-weight:700;{_c}'>{val}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+@st.dialog("📐 구매품 사내 표준단가 반영", width="large")
+def _sp_dialog(mapped_items: List[Dict[str, Any]], source_name: str) -> None:
+    """구매품 사내 표준단가 검증·반영 모달."""
+    st.caption(
+        "기구_구매품 · 제어_구매품 · 전장_구매품(사급품 포함)을 추출해 "
+        "사내 시스템 표준단가로 검증·반영합니다."
+    )
+
+    # ── Step 1: 대상 구매품 추출 ──
+    items = _sp.extract_purchase_items(mapped_items)
+    if not items:
+        st.warning("대상 구매품(기구/제어/전장_구매품)이 없습니다.")
+        if st.button("닫기", key="sp_close_empty"):
+            st.session_state.pop("_sp_open", None)
+            st.rerun()
+        return
+
+    s0 = _sp._build_summary(items, [], [], [], [])
+    st.subheader("1. 대상 구매품 추출")
+    m1, m2, m3, m4 = st.columns(4)
+    _sp_metric("전체 구매품", s0["total"], "#1f618d")
+    _sp_metric("사급 구매품", s0["supply_cnt"], "#c0392b")
+    _sp_metric("사급품 기존 합계", f"{s0['supply_old_total']:,.0f}원", "#c0392b")
+    _sp_metric("구매품 기존 총액", f"{s0['old_total']:,.0f}원", "#1f618d")
+
+    with st.expander(f"추출된 구매품 {len(items)}건 보기", expanded=False):
+        df_items = pd.DataFrame([{
+            "식별번호": it["id"], "구분": it["구분"], "품명": it["품명"],
+            "Maker": it["Maker"], "규격": it["규격"], "사급": it["사급"],
+            "수량": it["수량"], "단위": it["단위"], "기존단가": it["기존단가"],
+        } for it in items])
+        st.dataframe(_df_for_display(df_items), width="stretch", hide_index=True)
+
+    # ── Step 2: 요청용 Excel ──
+    st.subheader("2. 사내 시스템 단가 확인 요청용 Excel")
+    if STANDARD_PRICE_TEMPLATE_FILE.exists():
+        req_bytes = _sp.build_request_excel(items, str(STANDARD_PRICE_TEMPLATE_FILE))
+        _date = pd.Timestamp.now().strftime("%Y%m%d")
+        st.download_button(
+            "📤 표준단가_확인요청 Excel 다운로드",
+            data=req_bytes,
+            file_name=f"표준단가_확인요청_{source_name}_{_date}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            key="sp_dl_request",
+        )
+        st.caption(
+            "위 파일을 내려받아 사내 시스템에서 표준단가를 확인한 후, "
+            "조회 결과 Excel(개발단가 열 채움)을 아래에 다시 업로드하세요."
+        )
+    else:
+        st.error(f"요청 템플릿이 없습니다: `{STANDARD_PRICE_TEMPLATE_FILE}`")
+
+    # ── Step 3: 결과 재업로드 + 검증/반영 ──
+    st.subheader("3. 표준단가 확인 결과 재업로드")
+    up = st.file_uploader(
+        "표준단가 확인 결과 Excel 업로드", type=["xlsx"], key="sp_result_upload"
+    )
+    if up is not None:
+        try:
+            results = _sp.parse_result_file(up.getvalue())
+        except Exception as e:
+            st.error(f"결과 파일 파싱 오류: {e}")
+            results = []
+        if not results:
+            st.warning("결과 파일에서 표준단가 데이터를 찾지 못했습니다.")
+        else:
+            result = _sp.match_and_apply(items, results)
+            s = result["summary"]
+
+            st.subheader("4. 표준단가 반영 결과")
+            c1, c2, c3, c4 = st.columns(4)
+            _sp_metric("요청 대상", s["total"], "#1f618d")
+            _sp_metric("반영 완료", s["applied"], "#27ae60")
+            _sp_metric("확인 완료-변경 없음", s["unchanged"], "#1f618d")
+            _sp_metric("미반영", s["missed"], "#c0392b")
+            c5, c6, c7, c8 = st.columns(4)
+            _sp_metric("매칭 확인 필요", s["match_check"], "#b9770e")
+            _sp_metric("변경 전 총액", f"{s['old_total']:,.0f}원")
+            _sp_metric("변경 후 총액", f"{s['new_total']:,.0f}원")
+            _dpct = f"{s['delta_pct']:.2f}%" if s["delta_pct"] is not None else "비교 불가"
+            _dcolor = "#c0392b" if s["delta"] > 0 else "#27ae60"
+            _sp_metric("총 증감", f"{s['delta']:+,.0f}원 ({_dpct})", _dcolor)
+
+            # 사급품 합계 (요청: 화면에 띄워줘)
+            st.markdown(
+                f"<div style='background:#fdedec;border:1px solid #f5b7b1;border-radius:8px;"
+                f"padding:10px 14px;margin:8px 0;font-size:0.9rem;'>"
+                f"🏷️ <b>사급품 합계</b> (기존 기준): "
+                f"<b style='color:#c0392b;'>{s['supply_old_total']:,.0f}원</b> "
+                f"({s['supply_cnt']}건) — 사급품은 표준단가 반영 대상이며, "
+                f"견적 합계 포함 여부는 원본/업무 규칙에 따름.</div>",
+                unsafe_allow_html=True,
+            )
+
+            # 반영 품목
+            if result["applied"] or result["unchanged"]:
+                with st.expander(f"▸ 표준단가 반영 품목 ({len(result['applied'])+len(result['unchanged'])}건)", expanded=True):
+                    df_ap = pd.DataFrame([{
+                        "식별번호": r["id"], "구분": r["구분"], "품명": r["품명"],
+                        "Maker": r["Maker"], "규격": r["규격"], "사급": r["사급"],
+                        "수량": r["수량"], "변경 전 단가": r["기존단가"],
+                        "표준단가": r["표준단가"], "변경 후 금액": r["변경후금액"],
+                        "증감률(%)": round(r["증감률"], 2) if r["증감률"] is not None else "비교 불가",
+                        "결과": r["결과"],
+                    } for r in result["applied"] + result["unchanged"]])
+                    st.dataframe(_df_for_display(df_ap), width="stretch", hide_index=True)
+
+            # 미반영 품목
+            if result["missed"]:
+                with st.expander(f"▸ 표준단가 미반영 품목 ({len(result['missed'])}건)", expanded=True):
+                    df_ms = pd.DataFrame([{
+                        "식별번호": r["id"], "구분": r["구분"], "품명": r["품명"],
+                        "Maker": r["Maker"], "규격": r["규격"], "사급": r["사급"],
+                        "수량": r["수량"], "기존 단가": r["기존단가"],
+                        "기존 금액": r["수량"] * r["기존단가"],
+                        "미반영 사유": r["미반영사유"], "주석": r["주석"],
+                    } for r in result["missed"]])
+                    st.dataframe(_df_for_display(df_ms), width="stretch", hide_index=True)
+
+            # 매칭 확인 필요
+            if result["match_check"]:
+                with st.expander(f"▸ 매칭 확인 필요 품목 ({len(result['match_check'])}건)", expanded=True):
+                    df_mc = pd.DataFrame([{
+                        "식별번호": r["id"], "원본 품목": r["품명"],
+                        "매칭 후보": "; ".join(
+                            f"{c.get('품명')}/{c.get('Maker')}/{c.get('규격')}={c.get('표준단가')}"
+                            for c in r["매칭후보"]),
+                        "사유": r["사유"],
+                    } for r in result["match_check"]])
+                    st.dataframe(_df_for_display(df_mc), width="stretch", hide_index=True)
+
+            # 판단근거
+            with st.expander("▸ 판단근거", expanded=False):
+                for line in _sp._basis_text(result, source_name):
+                    st.text(line)
+
+            # 최종 출력
+            st.subheader("5. 최종 출력")
+            res_bytes = _sp.build_result_excel(result, source_name)
+            st.download_button(
+                "📑 표준단가_반영결과 Excel (요약+반영+미반영+매칭+이력)",
+                data=res_bytes,
+                file_name=f"표준단가_반영결과_{source_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="sp_dl_result",
+            )
+            st.success(
+                "업로드된 표준단가 확인 결과와 원본 구매품을 비교했습니다. 정상적으로 매칭된 "
+                "품목에는 표준단가를 반영했으며, 확인되지 않거나 매칭이 불명확한 품목은 기존 "
+                "초기 단가를 유지하고 '표준단가 미반영-확인 필요'로 표시했습니다."
+            )
+
+    if st.button("닫기", key="sp_close"):
+        st.session_state.pop("_sp_open", None)
+        st.rerun()
 
 
 # ─── 페이지 설정 ───────────────────────────────────────────────
@@ -1420,6 +1592,12 @@ if parsed_items and mapped_items:
         )
     else:
         st.info("📐 '견적조정 산출' 버튼을 클릭하면 조정 결과가 계산됩니다.")
+
+    # ─── 4-1. 구매품 사내 표준단가 반영 ──────────────────────
+    if st.button("📐 구매품 사내 표준단가 반영", type="secondary"):
+        st.session_state["_sp_open"] = True
+    if st.session_state.get("_sp_open"):
+        _sp_dialog(mapped_items, uploaded_file.name)
 
     # ─── 5. 분석 결과 내보내기 (원가분석툴과 동일 문서) ──────────
     st.header("5️⃣ 분석 결과 내보내기")

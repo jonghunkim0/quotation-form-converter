@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>표준단가 검증·반영 — UI 미리보기</title>
+<style>
+  :root{
+    --blue:#1f618d; --blue-d:#1a5276; --blue-l:#eaf2f8;
+    --green:#27ae60; --green-l:#d5f5e3;
+    --red:#c0392b; --red-l:#fdedec;
+    --amber:#b9770e; --amber-l:#fef5e7;
+    --gray:#7f8c8d; --line:#d5d8dc; --bg:#f4f6f7;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:'Segoe UI','Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background:#fff; padding:26px 30px; font-size:13px; color:#222; max-width:1180px; margin:0 auto;
+  }
+  h1{font-size:1.35rem; margin:0 0 4px;}
+  h2{font-size:1.15rem; margin:0 0 4px; display:flex; align-items:center; gap:8px;}
+  h3{font-size:0.98rem; margin:18px 0 8px; color:#2c3e50;}
+  .caption{color:#777; font-size:0.82rem; margin-bottom:14px; line-height:1.5;}
+  .badge{
+    display:inline-block; background:var(--blue-l); color:var(--blue);
+    border:1px solid #aed6f1; border-radius:10px; padding:1px 9px; font-size:0.72rem; font-weight:600;
+  }
+  .badge.preview{background:#fff3cd; color:#856404; border-color:#ffe08a;}
+  .badge.new{background:var(--green-l); color:var(--green); border-color:#a9dfbf;}
+
+  /* 앱 섹션 헤더 (Streamlit st.header 스타일) */
+  .app-section{
+    border-top:2px solid var(--line); margin-top:30px; padding-top:16px;
+  }
+  .app-section > .sec-title{
+    font-size:1.12rem; font-weight:700; color:#2c3e50;
+    padding-bottom:8px; border-bottom:1px solid var(--line); margin-bottom:14px;
+  }
+  .flow-note{
+    background:var(--bg); border-left:4px solid var(--blue);
+    padding:10px 14px; font-size:0.82rem; color:#555; margin-bottom:16px; line-height:1.6;
+  }
+
+  table{border-collapse:collapse; width:100%; table-layout:fixed; margin-bottom:6px;}
+  th{
+    background:var(--blue); color:#fff; padding:8px 9px;
+    text-align:center; font-size:0.82rem; font-weight:600; border:1px solid var(--blue-d);
+  }
+  td{
+    border:1px solid var(--line); padding:6px 9px;
+    text-align:center; vertical-align:middle; font-size:0.82rem; word-break:break-word;
+  }
+  td.l{text-align:left;} td.r{text-align:right;}
+  tr.subtotal td{background:var(--amber-l); font-weight:700;}
+  tr.total td{background:#c8e6c9; font-weight:700;}
+  tr.hl-apply td{background:var(--green-l);}
+  tr.hl-none td{background:#fff;}
+  tr.hl-miss td{background:var(--red-l);}
+  tr.hl-match td{background:var(--amber-l);}
+
+  .tag{display:inline-block; border-radius:4px; padding:1px 7px; font-size:0.72rem; font-weight:600;}
+  .tag.mech{background:#e8f0fe; color:#1a56db;}
+  .tag.ctrl{background:#fef3e2; color:#b45309;}
+  .tag.elec{background:#f3e8ff; color:#7c3aed;}
+  .tag.supply{background:var(--red-l); color:var(--red);}
+  .tag.nosupply{background:var(--bg); color:var(--gray);}
+  .tag.check{background:var(--amber-l); color:var(--amber);}
+  .tag.ok{background:var(--green-l); color:var(--green);}
+  .tag.miss{background:var(--red-l); color:var(--red);}
+  .tag.match{background:var(--amber-l); color:var(--amber);}
+  .tag.same{background:var(--blue-l); color:var(--blue);}
+
+  .delta-up{color:var(--red); font-weight:600;}
+  .delta-down{color:var(--green); font-weight:600;}
+  .delta-same{color:var(--gray);}
+
+  /* 버튼 (Streamlit download_button 스타일) */
+  .btn{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--blue); color:#fff; border:none; border-radius:6px;
+    padding:9px 18px; font-size:0.88rem; font-weight:600; cursor:pointer;
+  }
+  .btn.secondary{background:#fff; color:var(--blue); border:1px solid var(--blue);}
+  .btn-row{display:flex; gap:12px; flex-wrap:wrap; margin:12px 0;}
+
+  /* 업로드 박스 */
+  .upload-box{
+    border:2px dashed #b0b8bf; border-radius:8px; padding:18px; text-align:center;
+    background:#fafbfc; color:#777; font-size:0.85rem; margin:10px 0;
+  }
+  .upload-box.filled{border-style:solid; border-color:var(--green); background:var(--green-l); color:#1e7e34;}
+
+  /* metric 카드 */
+  .metrics{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:14px 0;}
+  .metric{border:1px solid var(--line); border-radius:8px; padding:12px 14px; background:#fff;}
+  .metric .lbl{font-size:0.78rem; color:#888;}
+  .metric .val{font-size:1.35rem; font-weight:700; margin-top:2px;}
+  .metric .val.green{color:var(--green);} .metric .val.red{color:var(--red);}
+  .metric .val.blue{color:var(--blue);} .metric .val.amber{color:var(--amber);}
+
+  /* 판단근거 박스 */
+  .basis{
+    background:#f8f9fa; border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; font-size:0.84rem; line-height:1.7; margin:10px 0;
+  }
+  .basis .h{font-weight:700; color:var(--blue); margin-bottom:6px;}
+  .basis ul{margin:6px 0 0; padding-left:20px;}
+  .basis li{margin:2px 0;}
+
+  .callout{
+    border-radius:8px; padding:12px 16px; font-size:0.85rem; line-height:1.6; margin:12px 0;
+  }
+  .callout.info{background:var(--blue-l); border:1px solid #aed6f1; color:#1a5276;}
+  .callout.success{background:var(--green-l); border:1px solid #a9dfbf; color:#1e7e34;}
+  .callout.warn{background:var(--amber-l); border:1px solid #f5cba7; color:#7d5a10;}
+
+  .step-chip{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:22px; height:22px; border-radius:50%; background:var(--blue); color:#fff;
+    font-size:0.78rem; font-weight:700; margin-right:8px;
+  }
+  .muted{color:#999;}
+  .mono{font-family:Consolas,monospace; font-size:0.8rem;}
+  .legend{font-size:0.76rem; color:#777; margin:4px 0 10px;}
+  .legend .tag{margin-right:6px;}
+</style>
+</head>
+<body>
+
+<h1>📐 표준단가 검증·반영 Agent <span class="badge preview">UI 미리보기</span> <span class="badge new">신규 기능</span></h1>
+<div class="caption">
+  견적표준포맷 변환 Agent에 추가될 <b>「구매품 표준단가 검증·반영」</b> 기능의 화면 구성 미리보기입니다.<br>
+  실제 데이터(풍산 견적)의 구매품을 예시로 사용했으며, <b>아직 코드로 구현되지 않은 설계안</b>입니다.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     앱 내 위치 (플로우)
+═══════════════════════════════════════════════════════════ -->
+<div class="app-section">
+  <div class="sec-title">🧭 앱 내 위치 — 기존 섹션 플로우</div>
+  <div class="flow-note">
+    기존 1️⃣~5️⃣ 섹션 사이에 <b>「4-1. 표준단가 검증·반영」</b>을 신규 삽입합니다.
+    표준 양식 변환(2️⃣)이 완료된 뒤, 표준 양식 다운로드(3️⃣)와 견적 조정(4️⃣) 사이에 배치되어
+    <b>표준단가 반영 → (반영된) 표준 양식 다운로드 → 조정</b> 순서로 이어집니다.
+  </div>
+  <table>
+    <colgroup><col style="width:12%"><col style="width:58%"><col style="width:30%"></colgroup>
+    <tr><th>순서</th><th class="l">섹션</th><th>상태</th></tr>
+    <tr><td>1️⃣</td><td class="l">견적서 업로드 (원가분석 Agent 자동 실행)</td><td><span class="tag same">기존</span></td></tr>
+    <tr><td>2️⃣</td><td class="l">표준 양식으로 변환</td><td><span class="tag same">기존</span></td></tr>
+    <tr><td>3️⃣</td><td class="l">표준 양식 다운로드</td><td><span class="tag same">기존</span></td></tr>
+    <tr class="hl-apply"><td><b>4-1</b></td><td class="l"><b>표준단가 검증·반영 (구매품)</b></td><td><span class="tag ok">신규</span></td></tr>
+    <tr><td>4️⃣</td><td class="l">견적 조정 (비율/인건비)</td><td><span class="tag same">기존</span></td></tr>
+    <tr><td>5️⃣</td><td class="l">분석 결과 내보내기</td><td><span class="tag same">기존</span></td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     4-1 섹션 본체
+═══════════════════════════════════════════════════════════ -->
+<div class="app-section">
+  <div class="sec-title">4-1. 표준단가 검증·반영 (구매품) <span class="badge new">신규</span></div>
+  <div class="caption">
+    기구_구매품 · 제어_구매품 · 전장_구매품의 모든 구매품(사급품 포함)을 추출해
+    사내 시스템 표준단가로 검증·반영합니다.
+  </div>
+
+  <!-- ── Step 1: 추출 ── -->
+  <h3><span class="step-chip">1</span>대상 구매품 추출</h3>
+  <div class="metrics">
+    <div class="metric"><div class="lbl">전체 구매품</div><div class="val blue">128</div></div>
+    <div class="metric"><div class="lbl">사급 구매품</div><div class="val red">14</div></div>
+    <div class="metric"><div class="lbl">구매품 여부 확인 필요</div><div class="val amber">3</div></div>
+    <div class="metric"><div class="lbl">제외(가공/인건/경비)</div><div class="val">—</div></div>
+  </div>
+  <div class="legend">
+    식별번호: <span class="tag mech">MECH=기구</span><span class="tag ctrl">CTRL=제어</span><span class="tag elec">ELEC=전장</span>
+    사급: <span class="tag supply">사급</span><span class="tag nosupply">비사급</span><span class="tag check">확인 필요</span>
+  </div>
+  <table>
+    <colgroup>
+      <col style="width:11%"><col style="width:9%"><col style="width:20%"><col style="width:13%">
+      <col style="width:16%"><col style="width:7%"><col style="width:7%"><col style="width:9%"><col style="width:8%">
+    </colgroup>
+    <tr>
+      <th>식별번호</th><th>대상 구분</th><th class="l">품명</th><th class="l">Maker</th>
+      <th class="l">모델명/규격</th><th>사급</th><th>수량</th><th>단위</th><th>기존 단가</th>
+    </tr>
+    <tr><td class="mono">MECH-0001</td><td><span class="tag mech">기구</span></td><td class="l">HI MOUNT</td><td class="l">SMC</td><td class="l">HM-16</td><td><span class="tag nosupply">비사급</span></td><td>20</td><td>EA</td><td class="r">60,500</td></tr>
+    <tr><td class="mono">MECH-0002</td><td><span class="tag mech">기구</span></td><td class="l">AIR CYLINDER</td><td class="l">SMC</td><td class="l">CDQ2B40-100</td><td><span class="tag nosupply">비사급</span></td><td>4</td><td>EA</td><td class="r">173,910</td></tr>
+    <tr><td class="mono">MECH-0003</td><td><span class="tag mech">기구</span></td><td class="l">MANIFOLD</td><td class="l">SMC</td><td class="l">SY5120-5LZ-01</td><td><span class="tag supply">사급</span></td><td>4</td><td>EA</td><td class="r">9,470</td></tr>
+    <tr><td class="mono">MECH-0004</td><td><span class="tag mech">기구</span></td><td class="l">SOLENOID V/V</td><td class="l">SMC</td><td class="l">SY5000-5LZ</td><td><span class="tag nosupply">비사급</span></td><td>4</td><td>EA</td><td class="r">33,440</td></tr>
+    <tr><td class="mono">MECH-0005</td><td><span class="tag mech">기구</span></td><td class="l">SPEED CONTROLLER</td><td class="l">—</td><td class="l">—</td><td><span class="tag check">확인 필요</span></td><td>48</td><td>EA</td><td class="r">6,490</td></tr>
+    <tr><td class="mono">CTRL-0001</td><td><span class="tag ctrl">제어</span></td><td class="l">PLC</td><td class="l">Mitsubishi</td><td class="l">iQ-R32CPU</td><td><span class="tag nosupply">비사급</span></td><td>1</td><td>EA</td><td class="r">1,250,000</td></tr>
+    <tr><td class="mono">CTRL-0002</td><td><span class="tag ctrl">제어</span></td><td class="l">HMI</td><td class="l">Mitsubishi</td><td class="l">GXW460</td><td><span class="tag supply">사급</span></td><td>1</td><td>EA</td><td class="r">0</td></tr>
+    <tr><td class="mono">CTRL-0003</td><td><span class="tag ctrl">제어</span></td><td class="l">SENSOR</td><td class="l">Keyence</td><td class="l">PZ-G31</td><td><span class="tag nosupply">비사급</span></td><td>12</td><td>EA</td><td class="r">88,000</td></tr>
+    <tr><td class="mono">ELEC-0001</td><td><span class="tag elec">전장</span></td><td class="l">케이블</td><td class="l">LS</td><td class="l">RV-600V 2.5mm²</td><td><span class="tag nosupply">비사급</span></td><td>100</td><td>M</td><td class="r">1,850</td></tr>
+    <tr><td class="mono">ELEC-0002</td><td><span class="tag elec">전장</span></td><td class="l">전선</td><td class="l">LS</td><td class="l">VCT 1.5mm²</td><td><span class="tag check">확인 필요</span></td><td>60</td><td>M</td><td class="r">1,200</td></tr>
+    <tr class="subtotal"><td colspan="8" class="l">합계 (128건 중 10건 예시)</td><td class="r">—</td></tr>
+  </table>
+  <div class="callout info">
+    💬 <b>안내:</b> "기구_구매품, 제어_구매품 및 전장_구매품의 구매품을 추출했습니다. 사급품도 포함되어 있습니다.
+    아래 파일을 내려받아 사내 시스템에서 표준단가를 확인한 후, 조회 결과 Excel 파일을 다시 업로드해 주세요."
+  </div>
+
+  <!-- ── Step 2: 요청용 Excel ── -->
+  <h3><span class="step-chip">2</span>사내 시스템 단가 확인 요청용 Excel</h3>
+  <div class="caption">
+    추출한 구매품을 사내 시스템 조회용 포맷으로 정리합니다.
+    <span class="muted">※ 실제 열 구성/시트명/입력 규칙은 사용자가 제공한 템플릿을 그대로 따릅니다.</span>
+  </div>
+  <table>
+    <colgroup>
+      <col style="width:12%"><col style="width:14%"><col style="width:14%"><col style="width:14%">
+      <col style="width:16%"><col style="width:10%"><col style="width:10%"><col style="width:10%">
+    </colgroup>
+    <tr>
+      <th>요청 식별번호</th><th class="l">품명</th><th class="l">제조사</th><th class="l">모델명</th>
+      <th class="l">규격</th><th>사급 여부</th><th>수량</th><th>단위</th>
+    </tr>
+    <tr><td class="mono">MECH-0001</td><td class="l">HI MOUNT</td><td class="l">SMC</td><td class="l">HM-16</td><td class="l">HM-16</td><td>비사급</td><td>20</td><td>EA</td></tr>
+    <tr><td class="mono">MECH-0002</td><td class="l">AIR CYLINDER</td><td class="l">SMC</td><td class="l">CDQ2B40-100</td><td class="l">CDQ2B40-100</td><td>비사급</td><td>4</td><td>EA</td></tr>
+    <tr><td class="mono">MECH-0003</td><td class="l">MANIFOLD</td><td class="l">SMC</td><td class="l">SY5120-5LZ-01</td><td class="l">SY5120-5LZ-01</td><td>사급</td><td>4</td><td>EA</td></tr>
+    <tr><td class="mono">CTRL-0002</td><td class="l">HMI</td><td class="l">Mitsubishi</td><td class="l">GXW460</td><td class="l">GXW460</td><td>사급</td><td>1</td><td>EA</td></tr>
+    <tr><td class="mono">ELEC-0001</td><td class="l">케이블</td><td class="l">LS</td><td class="l">RV-600V 2.5</td><td class="l">RV-600V 2.5mm²</td><td>비사급</td><td>100</td><td>M</td></tr>
+  </table>
+  <div class="btn-row">
+    <button class="btn">📤 표준단가_확인요청_풍산견적_20261030.xlsx 다운로드</button>
+  </div>
+  <div class="legend">
+    파일명 규칙: <span class="mono">표준단가_확인요청_[원본파일명]_[작성일자].xlsx</span> ·
+    식별번호: MECH-####(기구) / CTRL-####(제어) / ELEC-####(전장) ·
+    사급품 단가 0원/공란도 요청 대상에 포함
+  </div>
+
+  <!-- ── Step 3: 재업로드 + 검증 ── -->
+  <h3><span class="step-chip">3</span>표준단가 확인 결과 재업로드 및 검증</h3>
+  <div class="upload-box">
+    📎 표준단가 확인 결과 Excel 업로드 (사내 시스템에서 조회 후 다운로드한 파일)<br>
+    <span class="muted">식별번호 우선 매칭 → 품명/제조사/모델명/규격/단위/사급 보조 매칭</span>
+  </div>
+  <div class="callout warn">
+    ⚠️ <b>검증 규칙:</b> 대소문자·공백·구분기호 정규화 비교 / 모델명·규격 핵심값 임의 생략 금지 /
+    복수 후보·충돌 시 자동 반영 금지 / 통화·단위 불분명 시 환산 금지 /
+    원본에 없는 품목은 '추가 확인 품목'으로 별도 표시
+  </div>
+
+  <!-- ── Step 4: 반영 ── -->
+  <h3><span class="step-chip">4</span>표준단가 반영 결과</h3>
+  <div class="metrics">
+    <div class="metric"><div class="lbl">요청 대상</div><div class="val blue">128</div></div>
+    <div class="metric"><div class="lbl">반영 완료</div><div class="val green">102</div></div>
+    <div class="metric"><div class="lbl">확인 완료-변경 없음</div><div class="val blue">11</div></div>
+    <div class="metric"><div class="lbl">미반영</div><div class="val red">10</div></div>
+    <div class="metric"><div class="lbl">매칭 확인 필요</div><div class="val amber">5</div></div>
+    <div class="metric"><div class="lbl">변경 전 총액</div><div class="val">498,553,771</div></div>
+    <div class="metric"><div class="lbl">변경 후 총액</div><div class="val">487,201,340</div></div>
+    <div class="metric"><div class="lbl">총 증감</div><div class="val green">-11,352,431 (-2.28%)</div></div>
+  </div>
+  <div class="legend">
+    건수 검증: 128 = 반영 102 + 변경없음 11 + 미반영 10 + 매칭확인 5 ✓
+  </div>
+
+  <h3 style="margin-top:14px;">▸ 표준단가 반영 품목</h3>
+  <table>
+    <colgroup>
+      <col style="width:10%"><col style="width:15%"><col style="width:11%"><col style="width:13%">
+      <col style="width:7%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:7%">
+    </colgroup>
+    <tr>
+      <th>식별번호</th><th class="l">품명</th><th class="l">Maker</th><th class="l">모델명/규격</th>
+      <th>사급</th><th>수량</th><th>변경 전</th><th>표준단가</th><th>변경 후 금액</th><th>증감률</th>
+    </tr>
+    <tr class="hl-apply"><td class="mono">MECH-0001</td><td class="l">HI MOUNT</td><td class="l">SMC</td><td class="l">HM-16</td><td><span class="tag nosupply">비사급</span></td><td>20</td><td class="r">60,500</td><td class="r">58,000</td><td class="r">1,160,000</td><td class="delta-down">-4.13%</td></tr>
+    <tr class="hl-apply"><td class="mono">MECH-0002</td><td class="l">AIR CYLINDER</td><td class="l">SMC</td><td class="l">CDQ2B40-100</td><td><span class="tag nosupply">비사급</span></td><td>4</td><td class="r">173,910</td><td class="r">168,000</td><td class="r">672,000</td><td class="delta-down">-3.40%</td></tr>
+    <tr class="hl-apply"><td class="mono">MECH-0003</td><td class="l">MANIFOLD</td><td class="l">SMC</td><td class="l">SY5120-5LZ-01</td><td><span class="tag supply">사급</span></td><td>4</td><td class="r">9,470</td><td class="r">9,470</td><td class="r">37,880</td><td class="delta-same">0%</td></tr>
+    <tr class="hl-apply"><td class="mono">CTRL-0001</td><td class="l">PLC</td><td class="l">Mitsubishi</td><td class="l">iQ-R32CPU</td><td><span class="tag nosupply">비사급</span></td><td>1</td><td class="r">1,250,000</td><td class="r">1,180,000</td><td class="r">1,180,000</td><td class="delta-down">-5.60%</td></tr>
+    <tr class="hl-apply"><td class="mono">ELEC-0001</td><td class="l">케이블</td><td class="l">LS</td><td class="l">RV-600V 2.5mm²</td><td><span class="tag nosupply">비사급</span></td><td>100</td><td class="r">1,850</td><td class="r">1,720</td><td class="r">172,000</td><td class="delta-down">-7.03%</td></tr>
+  </table>
+
+  <h3 style="margin-top:14px;">▸ 표준단가 미반영 품목</h3>
+  <table>
+    <colgroup>
+      <col style="width:11%"><col style="width:16%"><col style="width:12%"><col style="width:14%">
+      <col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:20%">
+    </colgroup>
+    <tr>
+      <th>식별번호</th><th class="l">품명</th><th class="l">Maker</th><th class="l">모델명/규격</th>
+      <th>사급</th><th>수량</th><th>기존 단가</th><th class="l">미반영 사유 / 주석</th>
+    </tr>
+    <tr class="hl-miss"><td class="mono">MECH-0005</td><td class="l">SPEED CONTROLLER</td><td class="l">—</td><td class="l">—</td><td><span class="tag check">확인 필요</span></td><td>48</td><td class="r">6,490</td><td class="l">조회 결과 없음 → <b>표준단가 미반영-확인 필요</b></td></tr>
+    <tr class="hl-miss"><td class="mono">CTRL-0002</td><td class="l">HMI</td><td class="l">Mitsubishi</td><td class="l">GXW460</td><td><span class="tag supply">사급</span></td><td>1</td><td class="r">0</td><td class="l">표준단가 공란 → <b>표준단가 미반영-확인 필요</b></td></tr>
+    <tr class="hl-miss"><td class="mono">ELEC-0002</td><td class="l">전선</td><td class="l">LS</td><td class="l">VCT 1.5mm²</td><td><span class="tag check">확인 필요</span></td><td>60</td><td class="r">1,200</td><td class="l">모델명 불일치 → <b>표준단가 미반영-확인 필요</b></td></tr>
+  </table>
+
+  <h3 style="margin-top:14px;">▸ 매칭 확인 필요 품목</h3>
+  <table>
+    <colgroup>
+      <col style="width:12%"><col style="width:20%"><col style="width:26%"><col style="width:22%"><col style="width:20%">
+    </colgroup>
+    <tr>
+      <th>식별번호</th><th class="l">원본 품목</th><th class="l">매칭 후보</th><th class="l">불일치 항목</th><th class="l">사용자 확인 필요</th>
+    </tr>
+    <tr class="hl-match"><td class="mono">MECH-0004</td><td class="l">SOLENOID V/V (4개, 33,440)</td><td class="l">SY5000-5LZ / SY5120-5LZ (2종)</td><td class="l">모델명 2종 충돌</td><td class="l">적용 모델명 지정</td></tr>
+    <tr class="hl-match"><td class="mono">ELEC-0003</td><td class="l">케이블 (100M, 1,850)</td><td class="l">RV-2.5 / RV-4.0 (통화 USD)</td><td class="l">통화 불일치</td><td class="l">환산 기준 제공</td></tr>
+  </table>
+
+  <!-- ── Step 6: 판단근거 ── -->
+  <h3><span class="step-chip">6</span>판단근거 및 변경 이력</h3>
+  <div class="basis">
+    <div class="h">[표준단가 반영 결과]</div>
+    <ul>
+      <li>표준단가 확인 요청 대상: 총 <b>128</b>건 (기구 62 · 제어 41 · 전장 25)</li>
+      <li>사급 구매품: <b>14</b>건</li>
+      <li>표준단가 반영 완료: <b>102</b>건 · 확인 완료-단가 변경 없음: <b>11</b>건</li>
+      <li>표준단가 미반영: <b>10</b>건 · 매칭 확인 필요: <b>5</b>건</li>
+      <li>변경 전 구매품 총액: <b>498,553,771원</b> → 변경 후: <b>487,201,340원</b></li>
+      <li>총 증감액: <b>-11,352,431원</b> (-2.28%)</li>
+      <li>적용한 표준단가 기준일: 2026-10-28 · 출처: 사내 ERP (표준단가_확인결과_20261028.xlsx)</li>
+    </ul>
+    <div style="margin-top:10px; color:#555;">
+      사내 시스템에서 확인된 구매품 표준단가를 기구_구매품, 제어_구매품 및 전장_구매품에 반영하였다.
+      사급품도 동일한 검증 대상에 포함하였다. 표준단가가 정상적으로 확인되고 원본 품목과 정확히 매칭된
+      항목은 표준단가로 업데이트하였으며, 기존 단가는 변경 이력에 보존하였다. 표준단가가 확인되지 않았거나
+      품목 매칭이 불명확한 항목은 기존 초기 단가를 유지하고 '표준단가 미반영-확인 필요'로 표시하였다.
+    </div>
+  </div>
+
+  <!-- ── Step 7: 최종 출력 ── -->
+  <h3><span class="step-chip">7</span>최종 출력</h3>
+  <div class="btn-row">
+    <button class="btn">📑 표준단가_반영결과_풍산견적.xlsx (요약+반영+미반영+매칭+이력)</button>
+    <button class="btn secondary">📐 표준단가 반영 완료 표준 양식 Excel</button>
+  </div>
+  <div class="callout success">
+    💬 <b>안내:</b> "업로드된 표준단가 확인 결과와 원본 구매품을 비교했습니다. 정상적으로 매칭된 품목에는
+    표준단가를 반영했으며, 확인되지 않거나 매칭이 불명확한 품목은 기존 초기 단가를 유지하고
+    '표준단가 미반영-확인 필요'로 표시했습니다."
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     구현 시 고려사항
+═══════════════════════════════════════════════════════════ -->
+<div class="app-section">
+  <div class="sec-title">🔧 구현 시 확인 필요 사항 (사용자 입력 대기)</div>
+  <div class="flow-note">
+    아래 항목은 스펙에 <b>[사용자 제공]</b>으로 표시된 부분으로, 실제 구현 전 확정 필요합니다.
+  </div>
+  <table>
+    <colgroup><col style="width:26%"><col style="width:74%"></colgroup>
+    <tr><th>항목</th><th class="l">설명</th></tr>
+    <tr><td>요청용 Excel 템플릿</td><td class="l">사내 시스템 단가 확인 요청용 실제 Excel 양식(시트명/열 이름/순서/입력 규칙). 제공 시 그대로 준수, 미제공 시 위 예시 포맷 사용</td></tr>
+    <tr><td>사급 여부 판별 기준</td><td class="l">원본의 '공급 구분/사급 여부' 열 위치 및 유사 표현(고객지급/발주처지급/무상사급 등) 목록 확정</td></tr>
+    <tr><td>결과 파일 열 매핑</td><td class="l">표준단가 결과 파일의 열 이름 → 표준 열 대응 규칙 (의미 동일 열 자동 대응, 불확실 열은 '확인 필요')</td></tr>
+    <tr><td>사급품 합계 포함 여부</td><td class="l">사급품 표준단가 반영 시 견적 합계에 포함할지 원본/업무 규칙에 따른 처리 기준</td></tr>
+    <tr><td>환율/단위 환산 기준</td><td class="l">통화·단위 불일치 시 환산 허용 여부 및 기준(환율표 등) 제공 여부</td></tr>
+  </table>
+</div>
+
+</body>
+</html>

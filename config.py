@@ -188,6 +188,9 @@ OUTPUT_DIR = DATA_DIR / "output"
 # 표준 양식 템플릿 파일 (고객사 표준 양식)
 DEFAULT_TEMPLATE_FILE = TEMPLATE_DIR / "고객사제출_표준양식.xlsx"
 
+# 사내 시스템 표준단가 확인 요청용 템플릿 (견적Item_Upload_Template_v2.0)
+STANDARD_PRICE_TEMPLATE_FILE = TEMPLATE_DIR / "표준단가_요청템플릿.xlsx"
+
 # 매핑 규칙 파일
 RULES_FILE = DATA_DIR / "mapping_rules.json"
 
