@@ -96,6 +96,12 @@ class RuleMapper:
             
             if str(item.get("단위", "")).strip() == "식":
                 is_unit = True
+
+            # "(1) PLC", "(2) 전장" 같은 패턴: Unit명 추출 (기존 "unit명" 패턴 미매칭 시)
+            if is_unit and not unit_name:
+                m2 = re.match(r"\(\d+\)\s*(.+)", code.strip())
+                if m2:
+                    unit_name = m2.group(1).strip()
             
             item["_합산"] = is_unit
             item["_unit_name"] = unit_name

@@ -446,26 +446,49 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
                 unit_no += 1
                 it["_unit_no"] = unit_no
 
+    # ── 가드: 같은 섹션에 같은 Unit이 2번 이상 배치되면 경고 ──
+    #    정상 분할은 "Unit이 서로 다른 섹션(구매품/가공품)에 1번씩"이므로,
+    #    같은 섹션 내 Unit 중복은 행 삽입/분할 버그의 신호다.
+    #    (구버전 버그로 Unit이 3번 연속·값 어긋남이 발생한 현상 방지용)
+    _unit_dup: List[str] = []
+    for sec_key, sec_items in items_by_section.items():
+        _seen: Dict[str, int] = {}
+        for it in sec_items:
+            if not it.get("_합산"):
+                continue
+            _uname = str(it.get("_unit_name") or it.get("품명") or "").strip() or "(빈Unit)"
+            _seen[_uname] = _seen.get(_uname, 0) + 1
+        for _uname, _cnt in _seen.items():
+            if _cnt > 1:
+                _unit_dup.append(f"{sec_key}: '{_uname}' x{_cnt}")
+    if _unit_dup:
+        import sys
+        _msg = "Unit 중복 감지 (같은 섹션에 같은 Unit 2회 이상): " + "; ".join(_unit_dup)
+        print(f"[standard_exporter] ⚠️ {_msg}", file=sys.stderr)
+
     # ── 디버그 덤프: 섹션 배정 결과 (data/_debug_export.json) ──
     try:
         _id_to_sec = {}
         for _k, _v in items_by_section.items():
             for _it in _v:
                 _id_to_sec[id(_it)] = _k
+        _dbg_items = []
+        for _k, _v in items_by_section.items():
+            for _it in _v:
+                _dbg_items.append({
+                    "row": _it.get("_행"),
+                    "unit": bool(_it.get("_합산")),
+                    "unit_name": _it.get("_unit_name", ""),
+                    "soye": bool(_it.get("_소계")),
+                    "bunryu": _it.get("_분류", ""),
+                    "section": _k,
+                    "name": str(_it.get("품명", ""))[:30],
+                    "split": bool(_it.get("_split_section")),
+                })
         _dbg = {
-            "items": [
-                {
-                    "row": it.get("_행"),
-                    "unit": bool(it.get("_합산")),
-                    "unit_name": it.get("_unit_name", ""),
-                    "soye": bool(it.get("_소계")),
-                    "bunryu": it.get("_분류", ""),
-                    "section": _id_to_sec.get(id(it), ""),
-                    "name": str(it.get("품명", ""))[:30],
-                }
-                for it in filtered_items
-            ],
+            "items": _dbg_items,
             "section_counts": {k: len(v) for k, v in items_by_section.items()},
+            "unit_dup_warning": _unit_dup,
         }
         _dbg_path = Path(__file__).resolve().parent.parent / "data" / "_debug_export.json"
         _dbg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -578,8 +601,8 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
                 if sub_end is not None and sub_end >= sub_start:
                     _safe_set_cell(ws, r, COL_DANGA, f"=SUM(J{sub_start}:J{sub_end})")
                 else:
-                    # 하위 항목이 없는 Unit 행 → 원본 단가 그대로
-                    _safe_set_cell(ws, r, COL_DANGA, item.get("단가", ""))
+                    # 하위 항목이 없는 Unit 행 → 단가 0 (원본 Unit 총액 사용 시 중복 계산 방지)
+                    _safe_set_cell(ws, r, COL_DANGA, 0)
                     detail_rows.append(r)
                 # J(금액): =G*I (1 * 합산단가 = 합산금액)
                 j_cell = ws.cell(r, COL_JEOMYEOK)

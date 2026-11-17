@@ -135,7 +135,7 @@ def build_request_excel(items: List[Dict[str, Any]], template_path: str) -> byte
     - A열 드롭다운 원본(N열)에 '기구부' 보강 (템플릿에 기구부 누락)
     - 샘플 데이터 행(2~3) 제거 후 데이터 입력
     - 식별번호+사급여부를 Comment(K)에 기록 (재매칭용)
-    - 개발단가(J)는 공란 (사용자가 사내 시스템에서 채움)
+    - 개발단가(J)에는 원본 파일의 각 부품 단가(기존단가)를 채움
     """
     wb = load_workbook(template_path)
     ws = wb.active
@@ -172,7 +172,7 @@ def build_request_excel(items: List[Dict[str, Any]], template_path: str) -> byte
         ws.cell(r, 7, it["Maker"])                       # G Maker
         ws.cell(r, 8, it["수량"])                         # H 수량
         ws.cell(r, 9, it["단위"])                         # I 단위
-        # J 개발단가: 공란 (사내 시스템에서 채움)
+        ws.cell(r, 10, it["기존단가"])                    # J 개발단가 (원본 부품 단가)
         ws.cell(r, 11, f"{it['id']} / {it['사급']}")     # K Comment (식별번호+사급)
         r += 1
 

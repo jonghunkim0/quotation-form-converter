@@ -357,7 +357,7 @@ def _sp_dialog(
             key="sp_dl_request",
         )
         st.caption(
-            "위 파일을 내려받아 사내 시스템에서 표준단가를 확인한 후, "
+            "위 파일을 내려받아 사내 시스템(PEOP)에서 표준단가를 확인한 후, "
             "조회 결과 Excel(개발단가 열 채움)을 아래에 다시 업로드하세요."
         )
     else:
@@ -366,7 +366,12 @@ def _sp_dialog(
     # ── Step 3: 결과 재업로드 + 검증/반영 ──
     st.subheader("3. 표준단가 확인 결과 재업로드")
     up = st.file_uploader(
-        "표준단가 확인 결과 Excel 업로드", type=["xlsx"], key="sp_result_upload"
+        "표준단가 확인 결과 Excel 업로드",
+        type=["xlsx"], key="sp_result_upload"
+    )
+    st.caption(
+        "(미반영 또는 특정 부품들의 단가 수정이 필요한 경우, 해당 파일에서 "
+        "M열 '견적기준가' 부분 수정하여 다시 업데이트 하면 최종 반영됩니다.)"
     )
     if up is not None:
         try:
@@ -1325,22 +1330,34 @@ if parsed_items and mapped_items:
     )
 
     # ─── 4-1. 구매품 사내 표준단가 반영 (캡션 바로 아래 배치) ──────
-    # 반영 여부 상태 배지: 다이얼로그에서 표준단가 반영을 마무리하면
-    # _sp_result가 저장됨 → 미반영/매칭확인 항목이 없으면 "반영 완료",
-    # 있으면 "미반영 상태". 아직 반영 전이면 "미반영 상태".
+    # 반영 여부 상태 배지:
+    #   - _sp_applied=True (사용자가 "✅ 표준단가 반영" 버튼 클릭) → "반영 완료"
+    #     (미매칭 건이 있으면 그 개수를 함께 표시)
+    #   - _sp_result만 있고 _sp_applied=False (결과 파일 업로드는 했지만
+    #     반영 버튼 아직 안 눌림) → "반영 버튼 클릭 필요"
+    #   - _sp_result도 없음 (아직 결과 파일 미업로드) → "미반영 상태"
     _sp_res = st.session_state.get("_sp_result")
-    if _sp_res is not None:
+    _sp_applied = st.session_state.get("_sp_applied", False)
+    if _sp_applied and _sp_res is not None:
         _sp_pending = len(_sp_res.get("missed", [])) + len(_sp_res.get("match_check", []))
-        _sp_done = _sp_pending == 0
+        if _sp_pending == 0:
+            _sp_done = True
+            _sp_badge = "✅ 사내 표준단가 반영 완료"
+        else:
+            _sp_done = False
+            _sp_badge = f"⚠️ 표준단가 미반영 상태 (미매칭 {_sp_pending}건)"
+    elif _sp_res is not None:
+        _sp_done = False
+        _sp_badge = "⚠️ 표준단가 반영 버튼 클릭 필요"
     else:
         _sp_done = False
-    _sp_badge = (
-        "✅ 사내 표준단가 반영 완료" if _sp_done
-        else "⚠️ 표준단가 미반영 상태"
-    )
-    _sp_color = "#27ae60" if _sp_done else "#c0392b"
-    _sp_bg = "#eafaf1" if _sp_done else "#fdedec"
-    _sp_border = "#a9dfbf" if _sp_done else "#f5b7b1"
+        _sp_badge = "⚠️ 표준단가 미반영 상태"
+    if _sp_done:
+        _sp_color, _sp_bg, _sp_border = "#27ae60", "#eafaf1", "#a9dfbf"
+    elif _sp_res is not None:
+        _sp_color, _sp_bg, _sp_border = "#e67e22", "#fef5e7", "#f5cba7"
+    else:
+        _sp_color, _sp_bg, _sp_border = "#c0392b", "#fdedec", "#f5b7b1"
 
     _sp_cols = st.columns([1, 1.4])
     if _sp_cols[0].button("📐 구매품 사내 표준단가 반영", type="primary"):
