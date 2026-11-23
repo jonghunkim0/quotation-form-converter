@@ -85,10 +85,10 @@ def main():
     # J열 수식 유지
     all_ok &= check("기구설계자(특급) J 수식", get(ws, 36, 10), "=G36*I36")
 
-    print("=== M열(검증결과) 인원×일수 표기 ===")
+    print("=== M열(검증결과) 인원×일수 표기 (원본 텍스트 그대로) ===")
     all_ok &= check("M36 (기구설계)", get(ws, 36, 13), "MD=30 (1명×30일+0명×30일)")
-    all_ok &= check("M44 (제어설계)", get(ws, 44, 13), "MD=45 (1명×45일+0명×45일)")
-    all_ok &= check("M46 (기구조립)", get(ws, 46, 13), "MD=140 (4명×20일+2명×30일)")
+    all_ok &= check("M44 (제어설계)", get(ws, 44, 13), "MD=45 (1名x45日)")
+    all_ok &= check("M46 (기구조립)", get(ws, 46, 13), "MD=140 (4名x20日+2名x30日)")
 
     print()
     print("ALL PASS" if all_ok else "SOME FAILED")

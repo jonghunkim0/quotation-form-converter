@@ -574,8 +574,8 @@ st.set_page_config(
 )
 
 # ─── 메인 헤더 ───────────────────────────────────────────────
-APP_VERSION = "0.2"
-APP_UPDATED = "2026. 10. 19."
+APP_VERSION = "0.3"
+APP_UPDATED = "2026. 11. 23."
 st.markdown(
     f'<div style="display:flex;align-items:baseline;gap:10px;">'
     f'<h1 style="margin:0;font-size:2.2rem;">📋 견적 표준 양식 변환기</h1>'
@@ -1529,7 +1529,7 @@ if parsed_items and mapped_items:
                     key=f"ratio_{key_p}", label_visibility="collapsed",
                 )
                 new_d = ic4.number_input(
-                    "대응기간(일)", min_value=0.0, step=1.0,
+                    "대응기간(일)", min_value=0.0, step=0.5,
                     value=float(st.session_state.ratio_inputs.get(key_d, r.adj_days) or 0),
                     key=f"ratio_{key_d}", label_visibility="collapsed",
                 )

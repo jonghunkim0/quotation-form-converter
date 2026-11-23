@@ -39,6 +39,11 @@ class RuleMapper:
         """
         mapped_items = []
         
+        # 컬럼 유추: 헤더가 규칙과 안 맞으면 데이터 내용/레이아웃으로 유추
+        self._infer_columns_from_data(items)
+        # 단가 컬럼 자동 감지 (견적가 등 미지 컬럼 → 인접 총액 수치 관계로 검증)
+        self._detect_price_column(items)
+        
         for item in items:
             raw_data = item.get("raw_data", {})
             mapped = self._map_single_item(raw_data, item)
@@ -176,6 +181,290 @@ class RuleMapper:
         
         return result
     
+    def _detect_price_column(self, items: List[Dict[str, Any]]) -> None:
+        """
+        단가 컬럼 자동 감지 (데이터 기반 검증).
+        
+        헤더에 '단가' 계열 컬럼이 없는 경우, '견적가' 같은 미지 컬럼이
+        실제로 단가인지 **인접한 총액(=수량×단가) 컬럼의 수치 관계**로
+        검증한다. (예: 헤더 '견적가' 옆에 '총액'이 있고 총액=수량×견적가
+        성립하면 견적가=단가로 인식)
+        
+        검증 조건:
+          - 후보: 이름에 견적가/단가/price/cost 포함, 단가로 매칭되지 않는 컬럼
+          - 총액: 이름에 총액/금액/amount/total 포함, 금액으로 매칭되는 컬럼
+          - 수량: 수량/qty/quantity 컬럼
+          - 샘플 200행 중 3행 이상, 80% 이상에서 총액 ≈ 수량×후보 (오차 1원/0.1%)
+        """
+        if not items:
+            return
+        headers = list(items[0].get("raw_data", {}).keys())
+        
+        # 이미 단가로 매칭되는 컬럼이 있으면 스킵
+        for h in headers:
+            std, _, _ = self._match_column(str(h))
+            if std == "단가":
+                return
+        
+        # 총액(금액) 컬럼 찾기
+        total_kw = ("총액", "금액", "amount", "total")
+        total_col = None
+        for h in headers:
+            h_str = str(h).strip().lower().replace(" ", "")
+            if any(kw in h_str for kw in total_kw):
+                std, _, _ = self._match_column(str(h))
+                if std == "금액":
+                    total_col = h
+                    break
+        # 수량 컬럼 찾기
+        qty_col = None
+        for h in headers:
+            std, _, _ = self._match_column(str(h))
+            if std == "수량":
+                qty_col = h
+                break
+        if qty_col is None:
+            return
+        
+        if total_col is None:
+            # 총액 열 이름이 없으면 수치 관계로 단가+금액 열 쌍을 찾음
+            unmapped_nums = []
+            for h in headers:
+                std, _, _ = self._match_column(str(h))
+                if std is not None or std == "수량":
+                    continue
+                n_num = 0
+                for item in items[:50]:
+                    v = item.get("raw_data", {}).get(h)
+                    if v is None:
+                        continue
+                    s = str(v).strip().replace(",", "")
+                    if not s or s.lower() == "nan" or s == "-":
+                        continue
+                    try:
+                        float(s)
+                        n_num += 1
+                    except ValueError:
+                        break
+                if n_num >= 3:
+                    unmapped_nums.append(h)
+            # 쌍 검증: qty × X ≈ Y
+            for i, x in enumerate(unmapped_nums):
+                for j, y in enumerate(unmapped_nums):
+                    if i == j:
+                        continue
+                    verified = 0
+                    checked = 0
+                    for item in items[:200]:
+                        raw = item.get("raw_data", {})
+                        try:
+                            qty = float(str(raw.get(qty_col, "")).replace(",", "").replace(" ", "") or 0)
+                            xv = float(str(raw.get(x, "")).replace(",", "").replace(" ", "") or 0)
+                            yv = float(str(raw.get(y, "")).replace(",", "").replace(" ", "") or 0)
+                        except (ValueError, TypeError):
+                            continue
+                        if qty <= 0 or xv <= 0 or yv <= 0:
+                            continue
+                        checked += 1
+                        if abs(qty * xv - yv) <= max(1.0, yv * 0.001):
+                            verified += 1
+                    if checked >= 3 and verified >= max(3, int(checked * 0.8)):
+                        self.custom_rules[str(x).strip().lower()] = "단가"
+                        self.custom_rules[str(y).strip().lower()] = "금액"
+                        print(f"[RuleMapper] 수치 유추: '{x}' → 단가, '{y}' → 금액 (qty×{x}≈{y} {verified}/{checked}행)")
+                        return
+            return
+        
+        # 후보 컬럼: 견적가/단가/가격/price/cost 포함, 단가로 매칭되지 않음
+        price_kw = ("견적가", "단가", "가격", "price", "cost")
+        candidates = []
+        for h in headers:
+            h_str = str(h).strip().lower().replace(" ", "")
+            if any(kw in h_str for kw in price_kw):
+                std, _, _ = self._match_column(str(h))
+                if std != "단가":
+                    candidates.append(h)
+        if not candidates:
+            # 이름 후보 없음 → 미매핑 숫자 컬럼 전체를 후보로 (내용 기반)
+            for h in headers:
+                std, _, _ = self._match_column(str(h))
+                if std is not None:
+                    continue
+                n_num = 0
+                for item in items[:50]:
+                    v = item.get("raw_data", {}).get(h)
+                    if v is None:
+                        continue
+                    s = str(v).strip().replace(",", "")
+                    if not s or s.lower() == "nan" or s == "-":
+                        continue
+                    try:
+                        float(s)
+                        n_num += 1
+                    except ValueError:
+                        break
+                if n_num >= 3:
+                    candidates.append(h)
+        
+        # 총액 컬럼에 가까운 후보 우선 (인접 열 우선)
+        try:
+            total_idx = headers.index(total_col)
+            candidates.sort(key=lambda h: abs(headers.index(h) - total_idx))
+        except ValueError:
+            pass
+        
+        # 수치 검증: 총액 ≈ 수량 × 후보값
+        for cand in candidates:
+            verified = 0
+            checked = 0
+            for item in items[:200]:
+                raw = item.get("raw_data", {})
+                try:
+                    qty = float(str(raw.get(qty_col, "")).replace(",", "").replace(" ", "") or 0)
+                    cand_v = float(str(raw.get(cand, "")).replace(",", "").replace(" ", "") or 0)
+                    tot_v = float(str(raw.get(total_col, "")).replace(",", "").replace(" ", "") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if qty <= 0 or cand_v <= 0 or tot_v <= 0:
+                    continue
+                checked += 1
+                if abs(qty * cand_v - tot_v) <= max(1.0, tot_v * 0.001):
+                    verified += 1
+            if checked >= 3 and verified >= max(3, int(checked * 0.8)):
+                self.custom_rules[str(cand).strip().lower()] = "단가"
+                print(f"[RuleMapper] 단가 컬럼 자동 감지: '{cand}' → 단가 (총액 '{total_col}' 수치 검증 {verified}/{checked}행)")
+                return
+    
+    # ── 내용 기반 유추: 알려진 단위 어휘 ──
+    _KNOWN_UNITS = {
+        "ea", "ea.", "pcs", "pc", "set", "set.", "md", "kg", "g", "l", "ml",
+        "m", "m2", "m3", "mm", "cm", "box", "roll", "sheet", "pair", "lot",
+        "개", "개수", "대", "식", "인", "인원", "일", "주", "월", "년", "회",
+        "人", "泊", "回", "日", "台", "セット", "個", "本", "枚", "点", "式",
+    }
+    _CODE_RE = re.compile(r"^(MECH|CTRL|ELEC|ITEM|PART|PRT)-\d{2,}$|^\d{1,4}[.)]$")
+    
+    def _infer_columns_from_data(self, items: List[Dict[str, Any]]) -> None:
+        """
+        데이터 내용 기반 컬럼 유추.
+        
+        업체마다 헤더 표기가 달라 규칙과 안 맞는 경우, 실제 데이터 값과
+        열 위치(레이아웃)를 보고 표준 컬럼을 유추한다:
+          1) 단위: 알려진 단위 어휘 (EA, SET, MD, 개, 대, ...)
+          2) 품목코드: "N)" 또는 "MECH-0001" 패턴
+          3) 수량: 정수·소값 컬럼
+          4) 레이아웃: 수량 열의 바로 앞=Maker, 그 앞=규격, 그 앞=품명
+             (견적서 표준 레이아웃: 품명 | 규격 | Maker | 수량 | 단위 | 단가 | 금액)
+        """
+        if not items:
+            return
+        headers = list(items[0].get("raw_data", {}).keys())
+        assigned = {}
+        for h in headers:
+            std, _, _ = self._match_column(str(h))
+            if std:
+                assigned[h] = std
+        
+        def col_values(h):
+            vals = []
+            for it in items[:300]:
+                v = it.get("raw_data", {}).get(h)
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if s and s.lower() != "nan" and s != "-":
+                    vals.append(s)
+            return vals
+        
+        def register(h, std, reason):
+            self.custom_rules[str(h).strip().lower()] = std
+            assigned[h] = std
+            print(f"[RuleMapper] 내용 유추: '{h}' → {std} ({reason})")
+        
+        # 0) 데이터 기반 교정: 품목코드로 매칭됐지만 값이 실제 명칭이면 품명으로
+        for h in list(assigned.keys()):
+            if assigned[h] != "품목코드":
+                continue
+            vals = col_values(h)
+            if not vals:
+                continue
+            code_hits = sum(1 for v in vals if self._CODE_RE.match(v))
+            if code_hits < max(2, int(len(vals) * 0.5)):
+                del assigned[h]
+                if "품명" not in assigned.values():
+                    register(h, "품명", "코드 오매칭 교정")
+        
+        # 1) 단위: 알려진 단위 어휘
+        for h in headers:
+            if h in assigned:
+                continue
+            vals = col_values(h)
+            if len(vals) < 3:
+                continue
+            hits = sum(1 for v in vals if v.lower().replace(" ", "") in self._KNOWN_UNITS)
+            if hits >= max(3, int(len(vals) * 0.8)):
+                register(h, "단위", f"단위 어휘 {hits}/{len(vals)}")
+        
+        # 2) 품목코드: "N)" 또는 "CODE-0001" 패턴
+        for h in headers:
+            if h in assigned:
+                continue
+            vals = col_values(h)
+            if len(vals) < 3:
+                continue
+            hits = sum(1 for v in vals if self._CODE_RE.match(v))
+            if hits >= max(3, int(len(vals) * 0.8)):
+                register(h, "품목코드", f"코드 패턴 {hits}/{len(vals)}")
+        
+        # 3) 수량: 정수·소값 컬럼 (레이아웃상 단가/금액보다 앞)
+        if "수량" not in assigned.values():
+            for h in headers:
+                if h in assigned:
+                    continue
+                vals = col_values(h)
+                if len(vals) < 3:
+                    continue
+                nums = []
+                ok = True
+                for v in vals:
+                    try:
+                        nums.append(float(v.replace(",", "")))
+                    except ValueError:
+                        ok = False
+                        break
+                if ok and all(n == int(n) for n in nums) and max(nums) <= 100000:
+                    register(h, "수량", f"정수 {len(vals)}행")
+                    break
+        
+        # 4) 레이아웃 유추: 수량 ← Maker ← 규격 ← 품명 (왼쪽에서 오른쪽)
+        qty_h = next((h for h, s in assigned.items() if s == "수량"), None)
+        if qty_h is not None and "Maker" not in assigned.values():
+            qi = headers.index(qty_h)
+            if qi > 0:
+                h = headers[qi - 1]
+                if h not in assigned:
+                    vals = col_values(h)
+                    if vals and all(len(v) <= 20 and re.search(r"[A-Za-z가-힣]", v) for v in vals):
+                        register(h, "Maker", "수량 열 직전")
+        maker_h = next((h for h, s in assigned.items() if s == "Maker"), None)
+        if maker_h is not None and "규격" not in assigned.values():
+            mi = headers.index(maker_h)
+            if mi > 0:
+                h = headers[mi - 1]
+                if h not in assigned:
+                    vals = col_values(h)
+                    if vals and all(re.search(r"[A-Za-z가-힣0-9]", v) for v in vals):
+                        register(h, "규격", "Maker 열 직전")
+        spec_h = next((h for h, s in assigned.items() if s == "규격"), None)
+        if spec_h is not None and "품명" not in assigned.values():
+            si = headers.index(spec_h)
+            if si > 0:
+                h = headers[si - 1]
+                if h not in assigned:
+                    vals = col_values(h)
+                    if vals and all(re.search(r"[A-Za-z가-힣]", v) for v in vals):
+                        register(h, "품명", "규격 열 직전")
+    
     def _match_column(self, orig_col: str) -> Tuple[Optional[str], float, str]:
         """
         원본 컬럼명을 표준 컬럼으로 매칭.
@@ -205,14 +494,30 @@ class RuleMapper:
             return COLUMN_MAPPING_RULES[orig_col_nospace], 0.95, f"완전 일치(공백제거): '{orig_col}'"
 
         # 3. 부분 일치 (원본 컬럼명이 규칙 키를 포함) - 공백 제거 버전도 시도
-        for rule_key, rule_target in COLUMN_MAPPING_RULES.items():
-            rk_nospace = rule_key.replace(" ", "")
-            if rule_key in orig_col or orig_col in rule_key \
-               or rk_nospace in orig_col_nospace or orig_col_nospace in rk_nospace:
-                # 길이가 길수록 더 정확한 매칭
-                confidence = 0.7 + 0.2 * (len(rule_key) / max(len(orig_col), len(rule_key)))
-                return rule_target, min(confidence, 0.9), f"부분 일치: '{orig_col}' ~ '{rule_key}'"
+        #    1글자 헤더(A, B, ...)는 부분일치 금지 ("a" in "part no" 등 오매칭 방지)
+        if len(orig_col_nospace) >= 2:
+            for rule_key, rule_target in COLUMN_MAPPING_RULES.items():
+                rk_nospace = rule_key.replace(" ", "")
+                if rule_key in orig_col or orig_col in rule_key \
+                   or rk_nospace in orig_col_nospace or orig_col_nospace in rk_nospace:
+                    # 길이가 길수록 더 정확한 매칭
+                    confidence = 0.7 + 0.2 * (len(rule_key) / max(len(orig_col), len(rule_key)))
+                    return rule_target, min(confidence, 0.9), f"부분 일치: '{orig_col}' ~ '{rule_key}'"
 
+        # 3.5) 퍼지 매칭 (단어 순서 차이, 오타 등)
+        import difflib
+        best_ratio = 0.0
+        best_key = None
+        for rule_key in COLUMN_MAPPING_RULES:
+            ratio = difflib.SequenceMatcher(
+                None, orig_col_nospace, rule_key.replace(" ", "")).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_key = rule_key
+        if best_ratio >= 0.85:
+            return COLUMN_MAPPING_RULES[best_key], 0.75, \
+                f"퍼지 매칭: '{orig_col}' ~ '{best_key}'"
+        
         # 4. 미매칭
         return None, 0.0, "매칭 실패"
     

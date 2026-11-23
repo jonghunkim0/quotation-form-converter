@@ -98,6 +98,8 @@ COLUMN_MAPPING_RULES = {
     "unit of measure": "단위",
     # 단가
     "단가": "단가",
+    "견적가": "단가",
+    "가격": "단가",
     "unit price": "단가",
     "price": "단가",
     "unit cost": "단가",
@@ -107,6 +109,7 @@ COLUMN_MAPPING_RULES = {
     "amount": "금액",
     "total price": "금액",
     "금액": "금액",
+    "총액": "금액",
     "total": "금액",
     "total amount": "금액",
     "합계": "금액",

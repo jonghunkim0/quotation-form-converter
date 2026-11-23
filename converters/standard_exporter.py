@@ -361,9 +361,22 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
     #    미분류/알 수 없는 분류의 항목은 재료비 기본 섹션(기구_구매품)으로 폴백 배치.
     items_by_section: Dict[str, List[Dict[str, Any]]] = {}
     known_sections = {s[0] for s in TEMPLATE_SECTIONS}
-    
-    # 소계/합계 행 제외 후 필터링
-    filtered_items = [item for item in items if not item.get("_소계")]
+
+    # 소계/합계 행 + 의미 없는 빈 행 제외 후 필터링
+    #    푸터 메모("-미쯔비시...", "-해외 셋업 제외" 등)나 섹션 헤더 잔재는
+    #    품명/규격/Maker/수량/단가/금액이 모두 비어 있어 출력에 빈 행으로 쓰인다.
+    #    (Unit/합산 행은 단가·금액이 있으므로 자연스럽게 유지됨)
+    def _is_meaningful(it: Dict[str, Any]) -> bool:
+        for k in ("품명", "규격", "Maker", "수량", "단가", "금액"):
+            v = it.get(k)
+            if v not in (None, "", 0, 0.0):
+                return True
+        return False
+
+    filtered_items = [
+        item for item in items
+        if not item.get("_소계") and _is_meaningful(item)
+    ]
     
     # Pass 1: 각 Unit(합산) 행에 family별 번호 부여
     #          기구부/제어부/전장부 각각 1)~N) (섹션 family마다 1부터 시작)
@@ -702,9 +715,7 @@ def _fill_detail_sheet(ws, items: List[Dict[str, Any]], show_original: bool,
 
 
 # ── 인건비: analyzer 카테고리 → 템플릿 행 라벨 (특급, 특급출현순, 고급, 고급출현순) ──
-# 템플릿 라벨이 중복되는 행(예: '양산 제어/전장 엔지니어(특급)' x2: 셋업 섹션+양산대응 섹션)은
-# 출현 순서로 구분. (2026-10-29: 새 템플릿에서 셋업 섹션의 '셋업 제어/전장 엔지니어' 라벨이
-# '양산 제어/전장 엔지니어'로 변경됨 → 셋업=1번째 출현, 양산대응=2번째 출현)
+# 2026-11-23: 셋업 섹션 라벨을 '셋업 제어/전장 엔지니어'로 수정 → 이제 모든 라벨이 고유
 _LABOR_ROW_MAP = {
     "인건비-기구 설계":        ("기구설계자(특급)", 0, "기구설계자(고급)", 0),
     "인건비-전장 설계":        ("전장설계자(특급)", 0, "전장설계자(고급)", 0),
@@ -712,9 +723,9 @@ _LABOR_ROW_MAP = {
     "인건비-기구 조립":        ("기구조립(특급)", 0, "기구조립(고급)", 0),
     "인건비-전장/제어 조립":   ("제어조립(특급)", 0, "제어조립(고급)", 0),
     "인건비-기구 셋업":        ("셋업 기구 엔지니어(특급)", 0, "셋업 기구 엔지니어(고급)", 0),
-    "인건비-전장/제어 셋업":   ("양산 제어/전장 엔지니어(특급)", 0, "양산 제어/전장 엔지니어(고급)", 0),
+    "인건비-전장/제어 셋업":   ("셋업 제어/전장 엔지니어(특급)", 0, "셋업 제어/전장 엔지니어(고급)", 0),
     "인건비-기구 양산대응":    ("양산 기구 엔지니어(특급)", 0, "양산 기구 엔지니어(고급)", 0),
-    "인건비-전장/제어 양산대응": ("양산 제어/전장 엔지니어(특급)", 1, "양산 제어/전장 엔지니어(고급)", 1),
+    "인건비-전장/제어 양산대응": ("양산 제어/전장 엔지니어(특급)", 0, "양산 제어/전장 엔지니어(고급)", 0),
     "인건비-특수제어":         ("제어 엔지니어(무관)", 0, None, 0),
 }
 
@@ -737,17 +748,15 @@ _MD_DAY_CANDIDATES = (7, 14, 21, 30, 60)
 
 def _calc_labor_md_split(md: float, remark: str):
     """
-    MD를 (대응인원수 × 대응일수) 기준으로 특급/고급 2분할 계산.
-    특급/고급은 대응 일수를 동일하게 유지하고 인원만 분배하며, 총 MD는 보존한다.
+    MD를 (대응인원수 × 대응일수/MD) 기준으로 특급/고급 2분할 계산.
     
     규칙:
-    - 비고에 인원×일수가 하나면 그 일수를 특급/고급 공통으로 사용 (인원만 분배)
-    - 비고에 인원×일수가 여러 개면 MD/총인원으로 평균 일수(반올림)를 공통 사용
+    - 비고에 인원×일수/MD가 하나면 인원 2분할(특급=ceil)
+    - 비고에 인원×일수/MD가 여러 개면 앞=특급, 뒤=고급
     - 비고에 정보가 없으면 7/14/21/30/60일 중 총 MD를 맞추는 적절한 인원수를 탐색
-    - 인원 2분할(특급=ceil)로 총 MD가 어긋나면 차이를 특급 MD에 보정
     
     Returns:
-        (spec_md, adv_md, display) — display: '4명×20일+2명×30일' 형식
+        (spec_md, adv_md, display) — display: 원본 비고의 인원×일수/MD 텍스트
     """
     import math
     import re
@@ -755,9 +764,12 @@ def _calc_labor_md_split(md: float, remark: str):
     if md <= 0:
         return 0, 0, ""
 
-    # 비고에서 인원×일수 쌍 추출: '4名x20日', '2명×30일', '1名x45日' 등
-    pairs = [(int(p), int(d)) for p, d in re.findall(
-        r"(\d+)\s*[名名명]\s*[xX×*]\s*(\d+)\s*[日日일]", remark or "")]
+    # 비고에서 인원×일수/MD 쌍 추출: '4명×20일', '2명×30일', '4명×2MD', '2명×1.5MD', '2인*1.5MD' 등
+    pair_re = re.compile(
+        r"(\d+)\s*[名名명인]\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:[日日일]|MD)")
+    matches = list(pair_re.finditer(remark or ""))
+    pairs = [(int(m.group(1)), float(m.group(2))) for m in matches]
+    pair_texts = [m.group(0) for m in matches]
 
     if not pairs:
         # 비고 없음: 기준 일수 후보 × 인원수로 MD 재현 (일수 작은 쪽 우선, 인원 1~10)
@@ -779,24 +791,24 @@ def _calc_labor_md_split(md: float, remark: str):
         return spec_md, adv_md, f"{spec_p}명×{d}일+{adv_p}명×{d}일"
 
     if len(pairs) == 1:
-        # 단일 표현: 일수 공통, 인원 2분할 (특급=ceil)
+        # 단일 표현: 인원 2분할 (특급=ceil)
         p, d = pairs[0]
         spec_p = math.ceil(p / 2)
         adv_p = p - spec_p
-        spec_md, adv_md = spec_p * d, adv_p * d
-        return spec_md, adv_md, f"{spec_p}명×{d}일+{adv_p}명×{d}일"
+        spec_md = int(round(spec_p * d))
+        adv_md = int(round(adv_p * d))
+        return spec_md, adv_md, pair_texts[0]
 
-    # 여러 표현: 비고의 인원×일수를 그대로 사용 (앞=특급, 뒤=고급)
+    # 여러 표현: 앞=특급, 뒤=고급 (원본 텍스트 그대로)
     spec_p, spec_d = pairs[0]
-    spec_md = spec_p * spec_d
+    spec_md = int(round(spec_p * spec_d))
     if len(pairs) == 2:
         adv_p, adv_d = pairs[1]
-        adv_md = adv_p * adv_d
+        adv_md = int(round(adv_p * adv_d))
     else:
         adv_p = sum(p for p, _ in pairs[1:])
-        adv_md = sum(p * d for p, d in pairs[1:])
-        adv_d = int(round(adv_md / adv_p)) if adv_p > 0 else 0
-    return spec_md, adv_md, f"{spec_p}명×{spec_d}일+{adv_p}명×{adv_d}일"
+        adv_md = int(round(sum(p * d for p, d in pairs[1:])))
+    return spec_md, adv_md, "+".join(pair_texts)
 
 
 def _calc_engineering_md(labor_data: Optional[Dict[str, Dict[str, Any]]]) -> float:
