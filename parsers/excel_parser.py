@@ -9,7 +9,13 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional
 
 # 소계/합계/총액 등 요약 행을 식별하는 키워드
-_SUBTOTAL_KEYWORDS = ("소계", "합계", "총액", "총 금액", "총금액", "subtotal", "total")
+# 기업이윤/최종금액/일반관리: 템플릿에서 수식으로 계산되는 푸터 행.
+# 원본 견적에 실제 수치가 채워져 있어(_is_meaningful 통과) 기구_구매품에
+# 빈 행으로 쓰이는 것을 방지하기 위해 파서 단계에서 제외.
+_SUBTOTAL_KEYWORDS = (
+    "소계", "합계", "총액", "총 금액", "총금액", "subtotal", "total",
+    "기업이윤", "최종금액", "일반관리",
+)
 
 
 def parse_excel(file) -> List[Dict[str, Any]]:

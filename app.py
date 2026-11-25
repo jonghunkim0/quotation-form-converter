@@ -199,6 +199,10 @@ def _adjust_family_by_gubun(items):
     
     대상: analyzer가 사급품/기구 계열로 분류한 항목 중
           Raw 구분이 전장/제어 계열인 경우.
+    
+    ※ analyzer가 직접 분류한 항목(_분류_이유가 "analyzer:"로 시작)은
+      analyzer 결과를 그대로 활용하기 위해 재조정 대상에서 제외.
+      (standalone analyzer와 분류 결과 일치)
     """
     # 전장/제어 계열 키워드 (품명 기반 판별용)
     CONTROL_KEYWORDS = [
@@ -222,6 +226,10 @@ def _adjust_family_by_gubun(items):
     ]
     
     for item in items:
+        # analyzer가 직접 분류한 항목은 재조정하지 않음 (analyzer 결과 그대로 활용)
+        if str(item.get("_분류_이유", "")).startswith("analyzer:"):
+            continue
+        
         # 현재 분류가 기구 계열(또는 사급품 폴백)인지 확인
         cur = item.get("_분류", "")
         if cur not in ("기구_구매품", "기구_가공품", "미분류"):
@@ -574,8 +582,8 @@ st.set_page_config(
 )
 
 # ─── 메인 헤더 ───────────────────────────────────────────────
-APP_VERSION = "0.3"
-APP_UPDATED = "2026. 11. 23."
+APP_VERSION = "0.4"
+APP_UPDATED = "2026. 11. 25."
 st.markdown(
     f'<div style="display:flex;align-items:baseline;gap:10px;">'
     f'<h1 style="margin:0;font-size:2.2rem;">📋 견적 표준 양식 변환기</h1>'
