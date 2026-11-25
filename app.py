@@ -582,7 +582,7 @@ st.set_page_config(
 )
 
 # ─── 메인 헤더 ───────────────────────────────────────────────
-APP_VERSION = "0.4"
+APP_VERSION = "0.5"
 APP_UPDATED = "2026. 11. 25."
 st.markdown(
     f'<div style="display:flex;align-items:baseline;gap:10px;">'
@@ -639,6 +639,28 @@ show_original = st.sidebar.checkbox(
 from config import DEFAULT_TEMPLATE_FILE
 template_file_path = None
 
+def _validate_template_file(uploaded) -> tuple:
+    """
+    업로드된 파일이 표준 양식 템플릿인지 검증.
+    '1.표준 견적서(갑지)' 또는 '2.상세 견적' 시트가 있어야 통과.
+    (원본 견적 파일을 템플릿으로 오업로드하는 것을 방지)
+    Returns: (ok: bool, message: str)
+    """
+    try:
+        import openpyxl
+        from io import BytesIO
+        wb = openpyxl.load_workbook(BytesIO(uploaded.getvalue()), read_only=True)
+        sheets = wb.sheetnames
+        wb.close()
+        if any("상세 견적" in s for s in sheets) or any("표준 견적서" in s for s in sheets):
+            return True, ""
+        return False, (
+            f"표준 양식 시트('1.표준 견적서(갑지)'/'2.상세 견적')가 없습니다. "
+            f"시트: {sheets}. 원본 견적 파일은 템플릿으로 사용할 수 없습니다."
+        )
+    except Exception as e:
+        return False, f"파일을 읽을 수 없습니다: {e}"
+
 if DEFAULT_TEMPLATE_FILE.exists():
     st.sidebar.caption(f"📄 템플릿: `{DEFAULT_TEMPLATE_FILE.name}`")
     
@@ -651,11 +673,17 @@ if DEFAULT_TEMPLATE_FILE.exists():
             help="업로드한 파일이 기본 템플릿을 대체합니다.",
         )
         if template_upload is not None:
-            template_file_path = "data/custom_template.xlsx"
-            Path("data").mkdir(exist_ok=True)
-            with open(template_file_path, "wb") as f:
-                f.write(template_upload.getvalue())
-            st.sidebar.success(f"템플릿 교체: `{template_upload.name}`")
+            # 표준 양식 구조 검증: '1.표준 견적서(갑지)'/'2.상세 견적' 시트가
+            # 없으면 원본 견적 파일을 템플릿으로 오업로드한 경우 → 거부.
+            _tpl_ok, _tpl_msg = _validate_template_file(template_upload)
+            if _tpl_ok:
+                template_file_path = "data/custom_template.xlsx"
+                Path("data").mkdir(exist_ok=True)
+                with open(template_file_path, "wb") as f:
+                    f.write(template_upload.getvalue())
+                st.sidebar.success(f"템플릿 교체: `{template_upload.name}`")
+            else:
+                st.sidebar.error(f"❌ 템플릿 거부: {_tpl_msg}")
 else:
     st.sidebar.warning("기본 템플릿이 없습니다. 파일을 지정하세요.")
     template_upload = st.sidebar.file_uploader(
@@ -663,10 +691,14 @@ else:
         type=["xlsx"],
     )
     if template_upload is not None:
-        template_file_path = "data/custom_template.xlsx"
-        Path("data").mkdir(exist_ok=True)
-        with open(template_file_path, "wb") as f:
-            f.write(template_upload.getvalue())
+        _tpl_ok, _tpl_msg = _validate_template_file(template_upload)
+        if _tpl_ok:
+            template_file_path = "data/custom_template.xlsx"
+            Path("data").mkdir(exist_ok=True)
+            with open(template_file_path, "wb") as f:
+                f.write(template_upload.getvalue())
+        else:
+            st.sidebar.error(f"❌ 템플릿 거부: {_tpl_msg}")
 
 # ─── 사이드바: 매핑 규칙 관리 ──────────────────────────────────
 st.sidebar.header("🔗 매핑 규칙")
@@ -852,6 +884,53 @@ if _chat_send and _chat_input.strip():
         # 입력框 초기화 (rerun 후 새 값으로 초기화)
         st.session_state["_chat_input_next"] = ""
         st.rerun()
+
+# ─── 자동 저장: 원본 + 표준 양식 Excel을 지정 폴더에 보관 ──────
+AUTO_SAVE_DIR = Path(r"D:\견적분석 Agent 파일")
+
+def _unique_path(target: Path) -> Path:
+    """
+   同名 파일이 이미 있으면 ver2, ver3, ... 를 붙인 빈 경로 반환.
+    예: foo.xlsx → foo_ver2.xlsx → foo_ver3.xlsx
+    """
+    if not target.exists():
+        return target
+    stem, suffix = target.stem, target.suffix
+    n = 2
+    while True:
+        cand = target.with_name(f"{stem}_ver{n}{suffix}")
+        if not cand.exists():
+            return cand
+        n += 1
+
+
+def _auto_save_files(uploaded_file, output_bytes) -> str:
+    """
+    변환 완료 시 원본 파일과 표준 양식 Excel을 AUTO_SAVE_DIR에 자동 저장.
+    폴더가 없으면 생성. 같은 이름 파일이 이미 있으면 _ver2/_ver3... 로 저장.
+    저장 성공 시 메시지 반환, 실패 시 빈 문자열.
+    """
+    try:
+        AUTO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        stem = Path(uploaded_file.name).stem
+
+        # 1) 원본 파일 저장 (이름 충돌 시 _ver2, _ver3...)
+        orig_path = _unique_path(AUTO_SAVE_DIR / uploaded_file.name)
+        with open(orig_path, "wb") as f:
+            f.write(uploaded_file.getvalue())
+
+        # 2) 표준 양식 Excel 저장 (이름 충돌 시 _ver2, _ver3...)
+        std_path = _unique_path(AUTO_SAVE_DIR / f"표준견적_{stem}.xlsx")
+        if output_bytes:
+            with open(std_path, "wb") as f:
+                f.write(output_bytes)
+
+        return (f"💾 자동 저장 완료: `{AUTO_SAVE_DIR}`\n"
+                f"   - 원본: `{orig_path.name}`\n"
+                f"   - 표준 양식: `{std_path.name}`")
+    except Exception as e:
+        st.warning(f"⚠️ 자동 저장 실패: {e}")
+        return ""
 
 # ─── 메인: 파일 업로드 ─────────────────────────────────────────
 st.header("1️⃣ 견적서 업로드")
@@ -1043,6 +1122,11 @@ cd C:\\AI_Agent\\quotation-form-converter
         # 원본 mapped_items 딥카피 (표준단가 반영 시 복원 기준).
         # 새 파일/설정 변경 시에만 갱신되어 항상 원본 단가를 보존한다.
         st.session_state["_sp_base_items"] = copy.deepcopy(mapped_items)
+
+        # ── 자동 저장: 원본 파일 + 표준 양식 Excel을 지정 폴더에 보관 ──
+        _auto_save_msg = _auto_save_files(uploaded_file, output_bytes)
+        if _auto_save_msg:
+            st.session_state["_auto_save_msg"] = _auto_save_msg
 
     if parsed_items:
         with st.expander(f"🔍 파싱 결과 (원본) 보기 — {len(parsed_items)}개 항목", expanded=False):
