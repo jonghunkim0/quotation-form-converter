@@ -582,7 +582,7 @@ st.set_page_config(
 )
 
 # ─── 메인 헤더 ───────────────────────────────────────────────
-APP_VERSION = "0.5"
+APP_VERSION = "0.6"
 APP_UPDATED = "2026. 11. 25."
 st.markdown(
     f'<div style="display:flex;align-items:baseline;gap:10px;">'
@@ -671,6 +671,7 @@ if DEFAULT_TEMPLATE_FILE.exists():
             "새 템플릿 Excel 업로드",
             type=["xlsx"],
             help="업로드한 파일이 기본 템플릿을 대체합니다.",
+            key="tpl_upload",
         )
         if template_upload is not None:
             # 표준 양식 구조 검증: '1.표준 견적서(갑지)'/'2.상세 견적' 시트가
@@ -683,12 +684,15 @@ if DEFAULT_TEMPLATE_FILE.exists():
                     f.write(template_upload.getvalue())
                 st.sidebar.success(f"템플릿 교체: `{template_upload.name}`")
             else:
-                st.sidebar.error(f"❌ 템플릿 거부: {_tpl_msg}")
+                # 표준 양식 시트가 없는 파일(원본 견적 등) → 조용히 무시
+                # (에러 메시지 표시 없이 기본 템플릿 유지, 업로더 상태 초기화)
+                st.session_state.pop("tpl_upload", None)
 else:
     st.sidebar.warning("기본 템플릿이 없습니다. 파일을 지정하세요.")
     template_upload = st.sidebar.file_uploader(
         "표준 양식 템플릿 Excel 업로드",
         type=["xlsx"],
+        key="tpl_upload_fallback",
     )
     if template_upload is not None:
         _tpl_ok, _tpl_msg = _validate_template_file(template_upload)
@@ -698,7 +702,8 @@ else:
             with open(template_file_path, "wb") as f:
                 f.write(template_upload.getvalue())
         else:
-            st.sidebar.error(f"❌ 템플릿 거부: {_tpl_msg}")
+            # 표준 양식 시트가 없는 파일 → 조용히 무시 (기본 템플릿 유지)
+            st.session_state.pop("tpl_upload_fallback", None)
 
 # ─── 사이드바: 매핑 규칙 관리 ──────────────────────────────────
 st.sidebar.header("🔗 매핑 규칙")
