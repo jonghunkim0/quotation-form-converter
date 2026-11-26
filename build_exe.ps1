@@ -75,6 +75,10 @@ $addDataArgs = @(
     "--add-data", "$root\templates;templates"
     "--add-data", "$root\data;data"
 )
+# templates xlsx 파일 명시적 추가 (한글 파일명 디렉터리 복사 누락 방지)
+Get-ChildItem (Join-Path $root "templates") -Filter "*.xlsx" -File | ForEach-Object {
+    $addDataArgs += @("--add-data", "$($_.FullName);templates")
+}
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
