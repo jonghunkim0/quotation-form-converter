@@ -30,3 +30,7 @@ tests/preview_compact.html
 build/
 dist/
 *.spec
+
+# watchdog runtime artifacts
+watchdog.pid
+watchdog.log
